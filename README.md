@@ -68,3 +68,7 @@ Automated tests cover silence, stereo channel separation, known 0/−3/−6/−1
 Before publishing a release, also run the Release build with music for at least 30 minutes and inspect CPU, working set, allocation rate, UI render activity, and capture-thread timing in Visual Studio Profiler or PerfView. The implementation has no growing queue or application-owned audio history, but an endurance profile on the target audio driver is still required.
 
 For the manual Rekordbox check, verify that channel TRIM, EQ, track pausing/resuming, and mixing two tracks change the readings as expected. Changing the controller's physical analog master level should not alter the digital PC MASTER OUT copy being measured.
+
+## License
+
+MIT. See [LICENSE](LICENSE). Third-party licenses are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
