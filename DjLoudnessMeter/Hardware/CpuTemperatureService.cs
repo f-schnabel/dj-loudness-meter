@@ -16,7 +16,6 @@ public sealed class CpuTemperatureService : IDisposable
     private IntPtr _counter;
     private IntPtr _valueBuffer;
     private uint _valueBufferSize;
-    private bool _readFailureLogged;
     private bool _disposed;
 
     public CpuTemperatureService()
@@ -45,10 +44,16 @@ public sealed class CpuTemperatureService : IDisposable
 
         try
         {
-            ThrowIfError(PdhCollectQueryData(_query), "collect thermal-zone data");
+            uint result = PdhCollectQueryData(_query);
+            if (result != ErrorSuccess)
+            {
+                DisableAfterReadFailure(result, "collect thermal-zone data");
+                return null;
+            }
+
             uint itemCount = 0;
             uint bufferSize = _valueBufferSize;
-            uint result = PdhGetFormattedCounterArray(
+            result = PdhGetFormattedCounterArray(
                 _counter,
                 PdhFormatDouble,
                 ref bufferSize,
@@ -66,7 +71,12 @@ public sealed class CpuTemperatureService : IDisposable
                     _valueBuffer);
             }
 
-            ThrowIfError(result, "read thermal-zone data");
+            if (result != ErrorSuccess)
+            {
+                DisableAfterReadFailure(result, "read thermal-zone data");
+                return null;
+            }
+
             double? hottestKelvin = null;
             int itemSize = Marshal.SizeOf<PdhFormattedCounterValueItem>();
             for (uint itemIndex = 0; itemIndex < itemCount; itemIndex++)
@@ -85,17 +95,12 @@ public sealed class CpuTemperatureService : IDisposable
                     : Math.Max(hottestKelvin.Value, item.Value.DoubleValue);
             }
 
-            _readFailureLogged = false;
             return hottestKelvin - KelvinOffset;
         }
         catch (Exception ex)
         {
-            if (!_readFailureLogged)
-            {
-                AppLog.Error("Windows thermal-zone temperature could not be read.", ex);
-                _readFailureLogged = true;
-            }
-
+            AppLog.Error("Windows thermal-zone temperature monitoring was disabled after a read failure.", ex);
+            ReleaseResources();
             return null;
         }
     }
@@ -121,6 +126,12 @@ public sealed class CpuTemperatureService : IDisposable
 
         _valueBuffer = Marshal.AllocHGlobal(checked((int)requiredSize));
         _valueBufferSize = requiredSize;
+    }
+
+    private void DisableAfterReadFailure(uint result, string operation)
+    {
+        AppLog.Error($"Windows thermal-zone monitoring was disabled: PDH could not {operation} (error 0x{result:X8}).");
+        ReleaseResources();
     }
 
     private void ReleaseResources()
