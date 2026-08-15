@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net9.0-windows10.0.19041": {
+      "NAudio.Wasapi": {
+        "type": "Direct",
+        "requested": "[3.0.0-preview.19, )",
+        "resolved": "3.0.0-preview.19",
+        "contentHash": "hq/zkx9TL1eV+LFUFFdYvFUebKGa2meVPrMUyvvf0cbDmZ0nm+FulsWiiwfBmfgRAf/xTBNhWCnwapl7Q8AMWQ==",
+        "dependencies": {
+          "NAudio.Core": "3.0.0-preview.19"
+        }
+      },
+      "NAudio.Core": {
+        "type": "Transitive",
+        "resolved": "3.0.0-preview.19",
+        "contentHash": "zbkvafVOzYWwEq0c6comhMek0HX97f7rCl9JPkvfiNSoeFb6QjXRnOA5Qe2QeJ//9qoiKsxFLT32xMA9mMDpDg==",
+        "dependencies": {
+          "System.Numerics.Tensors": "9.0.0"
+        }
+      },
+      "System.Numerics.Tensors": {
+        "type": "Transitive",
+        "resolved": "9.0.0",
+        "contentHash": "hyJB4UlpAi19Xr9AXzu2NuagKC4lPfHObNMEAA0HmqFz2rX7wKgzeYzO/jM/eBHDhnUGFFEjk5cOoJaxqg5J4A=="
+      }
+    },
+    "net9.0-windows10.0.19041/win-x64": {}
+  }
+}
