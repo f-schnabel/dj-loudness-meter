@@ -9,4 +9,16 @@ public sealed class AppSettingsTests
     {
         Assert.Equal(-9.0, new AppSettings().DisplayZeroDbfs);
     }
+
+    [Fact]
+    public void TaskbarMonitorDefaultsToAutomaticSelection()
+    {
+        Assert.Null(new AppSettings().TaskbarMonitorDeviceName);
+    }
+
+    [Fact]
+    public void TaskbarSideDefaultsToLeft()
+    {
+        Assert.False(new AppSettings().TaskbarRightAligned);
+    }
 }

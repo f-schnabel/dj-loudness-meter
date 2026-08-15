@@ -46,6 +46,8 @@ public partial class MainWindow : Window
     private double _displayZeroDbfs;
     private double _normalWidth = 440;
     private double _normalHeight = 520;
+    private double _normalLeft = double.NaN;
+    private double _normalTop = double.NaN;
 
     public MainWindow()
     {
@@ -53,9 +55,11 @@ public partial class MainWindow : Window
         _displayZeroDbfs = LoudnessDisplayScale.NormalizeReference(_settings.DisplayZeroDbfs);
         _captureService = new AudioCaptureService(TimeSpan.FromMilliseconds(Math.Clamp(_settings.PeakHoldMilliseconds, 0, 10000)));
         Devices = [];
+        Monitors = [];
         InitializeComponent();
         DataContext = this;
         DisplayZeroTextBox.Text = FormatReference(_displayZeroDbfs);
+        TaskbarSideComboBox.SelectedIndex = _settings.TaskbarRightAligned ? 1 : 0;
         MasterMeter.SetDisplayOffset(LoudnessDisplayScale.GetOffset(_displayZeroDbfs));
         UpdateThresholdTooltips();
 
@@ -68,10 +72,12 @@ public partial class MainWindow : Window
     }
 
     public ObservableCollection<AudioDeviceInfo> Devices { get; }
+    public ObservableCollection<DisplayMonitor> Monitors { get; }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         RestoreWindowSettings();
+        RefreshMonitors();
         if (!_settings.CompactMode && !_settings.TaskbarMode)
         {
             _normalWidth = Width;
@@ -106,10 +112,30 @@ public partial class MainWindow : Window
         {
             Left = _settings.WindowLeft;
             Top = _settings.WindowTop;
+            _normalLeft = Left;
+            _normalTop = Top;
         }
 
         AlwaysOnTopCheckBox.IsChecked = _settings.AlwaysOnTop;
         Topmost = _settings.AlwaysOnTop;
+    }
+
+    private void RefreshMonitors()
+    {
+        IReadOnlyList<DisplayMonitor> monitors = DisplayMonitor.GetAll();
+        Monitors.Clear();
+        foreach (DisplayMonitor monitor in monitors)
+        {
+            Monitors.Add(monitor);
+        }
+
+        MonitorPanel.Visibility = Monitors.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        DisplayMonitor? selected = Monitors.FirstOrDefault(monitor =>
+                string.Equals(monitor.DeviceName, _settings.TaskbarMonitorDeviceName, StringComparison.OrdinalIgnoreCase))
+            ?? Monitors.FirstOrDefault(static monitor => monitor.IsPrimary)
+            ?? Monitors.FirstOrDefault();
+        MonitorComboBox.SelectedItem = selected;
+        _settings.TaskbarMonitorDeviceName = selected?.DeviceName;
     }
 
     private void RefreshDevices()
@@ -246,6 +272,27 @@ public partial class MainWindow : Window
 
     private void OnRefreshDevicesClick(object sender, RoutedEventArgs e) => RefreshDevices();
 
+    private void OnMonitorSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (MonitorComboBox.SelectedItem is DisplayMonitor monitor)
+        {
+            _settings.TaskbarMonitorDeviceName = monitor.DeviceName;
+            if (_taskbarMode)
+            {
+                PositionTaskbarWindow();
+            }
+        }
+    }
+
+    private void OnTaskbarSideSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _settings.TaskbarRightAligned = TaskbarSideComboBox.SelectedIndex == 1;
+        if (_taskbarMode)
+        {
+            PositionTaskbarWindow();
+        }
+    }
+
     private void OnResetClick(object sender, RoutedEventArgs e)
     {
         try
@@ -305,6 +352,16 @@ public partial class MainWindow : Window
 
     private void OnTaskbarClick(object sender, RoutedEventArgs e) => SetTaskbarMode(true);
 
+    private void OnContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        if (!_taskbarMode)
+        {
+            e.Handled = true;
+        }
+    }
+
+    private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
+
     private void OnWindowMouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton == MouseButton.Left && !IsInsideInteractiveControl(e.OriginalSource as DependencyObject))
@@ -337,8 +394,7 @@ public partial class MainWindow : Window
         bool wasTaskbar = _taskbarMode;
         if (compact && !wasCompact && !wasTaskbar && !initial)
         {
-            _normalWidth = ActualWidth;
-            _normalHeight = ActualHeight;
+            RememberNormalBounds();
         }
 
         _taskbarMode = false;
@@ -374,6 +430,7 @@ public partial class MainWindow : Window
             {
                 Width = Math.Max(_normalWidth, MinWidth);
                 Height = Math.Max(_normalHeight, MinHeight);
+                RestoreNormalPosition();
             }
         }
     }
@@ -388,8 +445,7 @@ public partial class MainWindow : Window
 
         if (!_compactMode && !_taskbarMode && !initial)
         {
-            _normalWidth = ActualWidth;
-            _normalHeight = ActualHeight;
+            RememberNormalBounds();
         }
 
         _taskbarMode = true;
@@ -405,13 +461,113 @@ public partial class MainWindow : Window
         Topmost = true;
         WindowStartupLocation = WindowStartupLocation.Manual;
 
-        Rect workArea = SystemParameters.WorkArea;
-        double taskbarHeight = Math.Max(32, SystemParameters.PrimaryScreenHeight - workArea.Bottom);
-        Left = 0;
-        Top = workArea.Bottom;
-        Width = 430;
-        Height = taskbarHeight;
+        PositionTaskbarWindow();
         Dispatcher.BeginInvoke((Action)EnsureTaskbarZOrder, DispatcherPriority.Loaded);
+    }
+
+    private void RememberNormalBounds()
+    {
+        _normalWidth = ActualWidth;
+        _normalHeight = ActualHeight;
+        _normalLeft = Left;
+        _normalTop = Top;
+    }
+
+    private void RestoreNormalPosition()
+    {
+        DisplayMonitor monitor = FindMonitorForNormalPosition();
+        Rect workArea = ToWpfRect(monitor.WorkArea);
+        double wantedLeft = double.IsFinite(_normalLeft) ? _normalLeft : workArea.Left + ((workArea.Width - Width) / 2);
+        double wantedTop = double.IsFinite(_normalTop) ? _normalTop : workArea.Top + ((workArea.Height - Height) / 2);
+        Left = Math.Clamp(wantedLeft, workArea.Left, Math.Max(workArea.Left, workArea.Right - Width));
+        Top = Math.Clamp(wantedTop, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - Height));
+    }
+
+    private DisplayMonitor FindMonitorForNormalPosition()
+    {
+        if (double.IsFinite(_normalLeft) && double.IsFinite(_normalTop))
+        {
+            DisplayMonitor? matching = Monitors.FirstOrDefault(monitor =>
+            {
+                Rect bounds = ToWpfRect(monitor.Bounds);
+                return bounds.Contains(new Point(_normalLeft, _normalTop));
+            });
+            if (matching is not null)
+            {
+                return matching;
+            }
+        }
+
+        return Monitors.FirstOrDefault(static monitor => monitor.IsPrimary)
+            ?? Monitors.First();
+    }
+
+    private void PositionTaskbarWindow()
+    {
+        DisplayMonitor? monitor = MonitorComboBox.SelectedItem as DisplayMonitor
+            ?? Monitors.FirstOrDefault(static candidate => candidate.IsPrimary)
+            ?? Monitors.FirstOrDefault();
+        if (monitor is null)
+        {
+            return;
+        }
+
+        Rect bounds = ToWpfRect(monitor.Bounds);
+        Rect workArea = ToWpfRect(monitor.WorkArea);
+        double bottomTaskbarHeight = bounds.Bottom - workArea.Bottom;
+        double topTaskbarHeight = workArea.Top - bounds.Top;
+        double taskbarHeight;
+        if (bottomTaskbarHeight > 0)
+        {
+            Top = workArea.Bottom;
+            taskbarHeight = bottomTaskbarHeight;
+        }
+        else if (topTaskbarHeight > 0)
+        {
+            Top = bounds.Top;
+            taskbarHeight = topTaskbarHeight;
+        }
+        else
+        {
+            taskbarHeight = 42;
+            Top = bounds.Bottom - taskbarHeight;
+        }
+
+        Width = Math.Min(430, bounds.Width);
+        Height = Math.Max(32, taskbarHeight);
+        if (_settings.TaskbarRightAligned)
+        {
+            double? taskbarSafeRight = DisplayMonitor.GetTaskbarSafeRight(monitor.DeviceName);
+            double fallbackReserve = monitor.IsPrimary ? 240 : 120;
+            double safeRight = taskbarSafeRight is double physicalRight
+                ? ToWpfX(physicalRight) - 4
+                : bounds.Right - Math.Min(fallbackReserve, bounds.Width / 4);
+            Left = Math.Max(bounds.Left, safeRight - Width);
+        }
+        else
+        {
+            Left = bounds.Left;
+        }
+    }
+
+    private Rect ToWpfRect(Rect physicalRect)
+    {
+        double scale = GetCoordinateScale();
+        return new Rect(
+            physicalRect.Left / scale,
+            physicalRect.Top / scale,
+            physicalRect.Width / scale,
+            physicalRect.Height / scale);
+    }
+
+    private double ToWpfX(double physicalX) => physicalX / GetCoordinateScale();
+
+    private double GetCoordinateScale()
+    {
+        DisplayMonitor? primary = Monitors.FirstOrDefault(static monitor => monitor.IsPrimary);
+        return primary is not null && SystemParameters.PrimaryScreenWidth > 0
+            ? primary.Bounds.Width / SystemParameters.PrimaryScreenWidth
+            : 1;
     }
 
     private void EnsureTaskbarZOrder()
@@ -534,6 +690,8 @@ public partial class MainWindow : Window
         _settings.AlwaysOnTop = AlwaysOnTopCheckBox.IsChecked == true;
         _settings.CompactMode = _compactMode;
         _settings.TaskbarMode = _taskbarMode;
+        _settings.TaskbarMonitorDeviceName = (MonitorComboBox.SelectedItem as DisplayMonitor)?.DeviceName;
+        _settings.TaskbarRightAligned = TaskbarSideComboBox.SelectedIndex == 1;
         _settings.DisplayZeroDbfs = _displayZeroDbfs;
         _settingsService.Save(_settings);
     }

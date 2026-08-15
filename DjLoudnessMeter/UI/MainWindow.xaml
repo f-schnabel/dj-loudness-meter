@@ -14,8 +14,14 @@
         WindowStartupLocation="CenterScreen"
         Closing="OnClosing"
         Loaded="OnLoaded"
+        ContextMenuOpening="OnContextMenuOpening"
         MouseDoubleClick="OnWindowMouseDoubleClick"
         MouseLeftButtonDown="OnWindowMouseLeftButtonDown">
+  <Window.ContextMenu>
+    <ContextMenu>
+      <MenuItem Header="Close" Click="OnCloseClick" />
+    </ContextMenu>
+  </Window.ContextMenu>
   <Window.Resources>
     <Style x:Key="MeasurementLabelStyle" TargetType="TextBlock">
       <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
@@ -160,8 +166,24 @@
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
       <ComboBox x:Name="DeviceComboBox" ItemsSource="{Binding Devices}" DisplayMemberPath="FriendlyName" SelectionChanged="OnDeviceSelectionChanged" />
       <Button Grid.Column="1" Content="Refresh" Margin="8,0,0,0" Click="OnRefreshDevicesClick" />
+      <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8,0,0">
+        <TextBlock Text="Taskbar side" Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
+        <ComboBox x:Name="TaskbarSideComboBox" Width="90" SelectionChanged="OnTaskbarSideSelectionChanged">
+          <ComboBoxItem Content="Left" />
+          <ComboBoxItem Content="Right" />
+        </ComboBox>
+      </StackPanel>
+      <StackPanel x:Name="MonitorPanel" Grid.Row="2" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8,0,0" Visibility="Collapsed">
+        <TextBlock Text="Taskbar monitor" Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
+        <ComboBox x:Name="MonitorComboBox" Width="150" ItemsSource="{Binding Monitors}" DisplayMemberPath="FriendlyName" SelectionChanged="OnMonitorSelectionChanged" />
+      </StackPanel>
     </Grid>
 
     <Grid x:Name="FooterPanel" Grid.Row="5">
