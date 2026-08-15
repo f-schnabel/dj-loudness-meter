@@ -15,7 +15,7 @@ typedef struct {
     HWND settings_window, hit_window, overlay_window;
     HWND device_combo, monitor_combo, side_combo, zero_edit, rate_slider, rate_label;
     HWND loudness_check, system_check, status_label, format_label, monitor_label;
-    HFONT font, small_font, value_font;
+    HFONT font, small_font, value_font, system_value_font;
     HBRUSH background_brush;
     AppSettings settings;
     AudioEngine audio;

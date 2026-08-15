@@ -240,16 +240,17 @@ static COLORREF threshold_color(double value, double amber, double red) {
 
 static void draw_cell(HDC dc, App *app, RECT rect, const wchar_t *label, double raw, double warn, double red) {
     wchar_t value[32]; double adjusted = display_adjust(raw, app->settings.display_zero); format_reading(adjusted, value, _countof(value));
+    rect.right -= 5;
     SetTextColor(dc, secondary); SelectObject(dc, app->small_font); RECT top = rect; top.bottom = top.top + (rect.bottom - rect.top) / 2;
-    DrawTextW(dc, label, -1, &top, DT_CENTER | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX);
+    DrawTextW(dc, label, -1, &top, DT_RIGHT | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX);
     SetTextColor(dc, threshold_color(adjusted, display_adjust(warn, app->settings.display_zero), display_adjust(red, app->settings.display_zero)));
-    SelectObject(dc, app->value_font); RECT bottom = rect; bottom.top = top.bottom - 4; DrawTextW(dc, value, -1, &bottom, DT_CENTER | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
+    SelectObject(dc, app->value_font); RECT bottom = rect; bottom.top = top.bottom - 4; DrawTextW(dc, value, -1, &bottom, DT_RIGHT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
 }
 
 static void draw_system_cell(HDC dc, App *app, RECT rect, const wchar_t *label, double value, bool valid, const wchar_t *suffix) {
     wchar_t text[32]; if (valid) swprintf_s(text, _countof(text), L"%.0f%s", value, suffix); else wcscpy_s(text, _countof(text), L"N/A");
     SetTextColor(dc, secondary); SelectObject(dc, app->small_font); RECT top = rect; top.bottom = top.top + (rect.bottom - rect.top) / 2; DrawTextW(dc, label, -1, &top, DT_CENTER | DT_BOTTOM | DT_SINGLELINE);
-    SetTextColor(dc, primary); SelectObject(dc, app->value_font); RECT bottom = rect; bottom.top = top.bottom - 4; DrawTextW(dc, text, -1, &bottom, DT_CENTER | DT_TOP | DT_SINGLELINE);
+    SetTextColor(dc, primary); SelectObject(dc, app->system_value_font); RECT bottom = rect; bottom.top = top.bottom - 4; DrawTextW(dc, text, -1, &bottom, DT_CENTER | DT_TOP | DT_SINGLELINE);
 }
 
 static void paint_overlay(App *app, HDC dc, RECT bounds) {
@@ -363,8 +364,9 @@ int app_run(HINSTANCE instance, int show_command) {
     (void)show_command; INITCOMMONCONTROLSEX common = {sizeof(common), ICC_STANDARD_CLASSES | ICC_BAR_CLASSES}; InitCommonControlsEx(&common);
     App app; ZeroMemory(&app, sizeof(app)); app.instance = instance; settings_load(&app.settings); audio_init(&app.audio, app.settings.peak_hold_ms); system_metrics_init(&app.metrics); enumerate_monitors(&app);
     app.background_brush = CreateSolidBrush(RGB(17, 20, 23)); app.font = CreateFontW(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    app.small_font = CreateFontW(-11, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    app.value_font = CreateFontW(-16, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    app.small_font = CreateFontW(-9, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    app.value_font = CreateFontW(-16, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
+    app.system_value_font = CreateFontW(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
     HICON icon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_APP));
     WNDCLASSEXW settings_class = {sizeof(settings_class), CS_HREDRAW | CS_VREDRAW, settings_proc, 0, 0, instance, icon, LoadCursorW(NULL, IDC_ARROW), NULL, NULL, L"DjLoudnessMeterSettings", icon};
     WNDCLASSEXW hit_class = {sizeof(hit_class), CS_DBLCLKS, hit_proc, 0, 0, instance, icon, LoadCursorW(NULL, IDC_ARROW), NULL, NULL, L"DjLoudnessMeterHitArea", icon};
@@ -384,5 +386,5 @@ int app_run(HINSTANCE instance, int show_command) {
     MSG message; while (GetMessageW(&message, NULL, 0, 0) > 0) { TranslateMessage(&message); DispatchMessageW(&message); }
     audio_dispose(&app.audio); system_metrics_dispose(&app.metrics);
     DestroyWindow(app.overlay_window); DestroyWindow(app.hit_window); DestroyWindow(app.settings_window);
-    DeleteObject(app.font); DeleteObject(app.small_font); DeleteObject(app.value_font); DeleteObject(app.background_brush); return (int)message.wParam;
+    DeleteObject(app.font); DeleteObject(app.small_font); DeleteObject(app.value_font); DeleteObject(app.system_value_font); DeleteObject(app.background_brush); return (int)message.wParam;
 }
