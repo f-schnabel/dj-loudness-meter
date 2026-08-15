@@ -23,7 +23,7 @@ public partial class MainWindow : Window
     private const double LufsWarning = -12.0;
     private const double LufsCritical = -9.0;
     private const int SystemMetricsIntervalMilliseconds = 500;
-    private static readonly int[] RefreshIntervals = [50, 125, 250, 500, 750, 1000, 1250, 1500, 1750, 2000];
+    private static readonly int[] RefreshIntervals = [10, 50, 125, 250, 500, 750, 1000, 1250, 1500, 1750, 2000];
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoMove = 0x0002;
     private const uint SwpNoActivate = 0x0010;
@@ -92,22 +92,17 @@ public partial class MainWindow : Window
     public ObservableCollection<AudioDeviceInfo> Devices { get; }
     public ObservableCollection<DisplayMonitor> Monitors { get; }
 
-    private void OnLoaded(object sender, RoutedEventArgs e)
+    internal void Start()
     {
         RestoreWindowSettings();
         RefreshMonitors();
-        double contentHeight = ActualHeight;
-        SizeToContent = System.Windows.SizeToContent.Manual;
-        Height = Math.Max(MinHeight, contentHeight);
-        _normalWidth = ActualWidth;
-        _normalHeight = Height;
-
         RefreshDevices();
         ConfigureSettingsWindow();
         CreateTaskbarOverlay();
+        _normalWidth = Width;
+        _normalHeight = Height;
         PositionTaskbarWindow();
         _taskbarOverlay?.Show();
-        Hide();
         Dispatcher.BeginInvoke((Action)EnsureTaskbarZOrder, DispatcherPriority.Loaded);
         _uiTimer.Start();
     }
@@ -426,7 +421,6 @@ public partial class MainWindow : Window
 
     private void ConfigureSettingsWindow()
     {
-        ShowInTaskbar = true;
         Topmost = false;
         WindowStyle = WindowStyle.SingleBorderWindow;
         ResizeMode = ResizeMode.CanResize;
@@ -437,12 +431,28 @@ public partial class MainWindow : Window
 
     private void ShowSettingsWindow()
     {
+        ShowInTaskbar = true;
         if (!IsVisible)
         {
-            Width = Math.Max(_normalWidth, MinWidth);
-            Height = Math.Max(_normalHeight, MinHeight);
-            RestoreNormalPosition();
+            bool fitToContent = SizeToContent != System.Windows.SizeToContent.Manual;
+            if (!fitToContent)
+            {
+                Width = Math.Max(_normalWidth, MinWidth);
+                Height = Math.Max(_normalHeight, MinHeight);
+                RestoreNormalPosition();
+            }
+
             Show();
+            if (fitToContent)
+            {
+                double contentHeight = ActualHeight;
+                SizeToContent = System.Windows.SizeToContent.Manual;
+                Height = Math.Max(MinHeight, contentHeight);
+                _normalWidth = ActualWidth;
+                _normalHeight = Height;
+                _normalLeft = Left;
+                _normalTop = Top;
+            }
         }
 
         if (WindowState == WindowState.Minimized)
@@ -702,6 +712,14 @@ public partial class MainWindow : Window
         if (!_applicationClosing)
         {
             e.Cancel = true;
+            if (WindowState == WindowState.Normal)
+            {
+                _normalWidth = ActualWidth;
+                _normalHeight = ActualHeight;
+                _normalLeft = Left;
+                _normalTop = Top;
+            }
+
             Hide();
             return;
         }

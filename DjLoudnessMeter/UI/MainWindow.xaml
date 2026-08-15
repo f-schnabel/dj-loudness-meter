@@ -10,10 +10,10 @@
         Height="410"
         MinWidth="400"
         MinHeight="360"
+        ShowInTaskbar="False"
         SizeToContent="Height"
         WindowStartupLocation="CenterScreen"
-        Closing="OnClosing"
-        Loaded="OnLoaded">
+        Closing="OnClosing">
   <Grid x:Name="MainRoot" Margin="16">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
@@ -81,7 +81,7 @@
           </StackPanel>
 
           <TextBlock Grid.Row="3" Text="Update rate" Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center" Margin="0,10,0,0" />
-          <Slider x:Name="RefreshIntervalSlider" Grid.Row="3" Grid.Column="1" Minimum="50" Maximum="2000" Ticks="50,125,250,500,750,1000,1250,1500,1750,2000" IsSnapToTickEnabled="True" Margin="0,10,10,0" ValueChanged="OnRefreshIntervalChanged" />
+          <Slider x:Name="RefreshIntervalSlider" Grid.Row="3" Grid.Column="1" Minimum="10" Maximum="2000" Ticks="1,50,125,250,500,750,1000,1250,1500,1750,2000" IsSnapToTickEnabled="True" Margin="0,10,10,0" ValueChanged="OnRefreshIntervalChanged" />
           <TextBlock x:Name="RefreshIntervalValue" Grid.Row="3" Grid.Column="2" Width="58" TextAlignment="Right" VerticalAlignment="Center" Margin="0,10,0,0" />
 
           <TextBlock Grid.Row="4" Text="Values" Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center" Margin="0,10,0,0" />

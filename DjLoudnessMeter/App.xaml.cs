@@ -18,6 +18,10 @@ public partial class App : Application
         _consoleControlHandler = OnConsoleControl;
         SetConsoleCtrlHandler(_consoleControlHandler, add: true);
         base.OnStartup(e);
+
+        UI.MainWindow window = new();
+        MainWindow = window;
+        window.Start();
     }
 
     protected override void OnExit(ExitEventArgs e)
