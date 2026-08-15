@@ -1,0 +1,30 @@
+name: Release build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: 'vcpkg.json'
+      - name: Bundle libebur128
+        shell: pwsh
+        run: ./scripts/Build-Native.ps1 -VcpkgRoot $env:VCPKG_ROOT
+      - name: Test
+        run: dotnet test DjLoudnessMeter.sln -c Release -p:Platform=x64
+      - name: Publish
+        run: dotnet publish DjLoudnessMeter/DjLoudnessMeter.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish/win-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DjLoudnessMeter-win-x64
+          path: publish/win-x64/
