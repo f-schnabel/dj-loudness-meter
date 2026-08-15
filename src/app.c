@@ -273,6 +273,20 @@ static void paint_overlay(App *app, HDC dc, RECT bounds) {
     }
 }
 
+static bool ensure_overlay_buffer(App *app, HDC target, int width, int height) {
+    if (width < 1 || height < 1) return false;
+    if (!app->overlay_buffer_dc) app->overlay_buffer_dc = CreateCompatibleDC(target);
+    if (!app->overlay_buffer_dc) return false;
+    if (app->overlay_buffer_bitmap && app->overlay_buffer_width == width && app->overlay_buffer_height == height) return true;
+    HBITMAP bitmap = CreateCompatibleBitmap(target, width, height); if (!bitmap) return false;
+    if (app->overlay_buffer_bitmap) {
+        SelectObject(app->overlay_buffer_dc, app->overlay_buffer_original);
+        DeleteObject(app->overlay_buffer_bitmap);
+    }
+    app->overlay_buffer_original = SelectObject(app->overlay_buffer_dc, bitmap);
+    app->overlay_buffer_bitmap = bitmap; app->overlay_buffer_width = width; app->overlay_buffer_height = height; return true;
+}
+
 static void tick(App *app) {
     app->meter_snapshot = audio_snapshot(&app->audio); ULONGLONG now = GetTickCount64();
     if (!app->last_system_tick || now - app->last_system_tick >= 500) { app->last_system_tick = now; if (app->settings.show_system) app->system_snapshot = system_metrics_read(&app->metrics); if (!app->menu_open) position_overlay(app); }
@@ -354,7 +368,14 @@ static LRESULT CALLBACK overlay_proc(HWND window, UINT message, WPARAM wparam, L
     case WM_CONTEXTMENU: {
         int command = overlay_menu(app, window, lparam);
         if (command == ID_OPEN_SETTINGS) show_settings(app); else if (command == ID_CLOSE_APP) save_and_close(app); return 0; }
-    case WM_PAINT: { PAINTSTRUCT paint; HDC dc = BeginPaint(window, &paint); RECT rect; GetClientRect(window, &rect); paint_overlay(app, dc, rect); EndPaint(window, &paint); return 0; }
+    case WM_PAINT: {
+        PAINTSTRUCT paint; HDC dc = BeginPaint(window, &paint); RECT rect; GetClientRect(window, &rect);
+        int width = rect.right - rect.left, height = rect.bottom - rect.top;
+        if (ensure_overlay_buffer(app, dc, width, height)) {
+            paint_overlay(app, app->overlay_buffer_dc, rect);
+            BitBlt(dc, 0, 0, width, height, app->overlay_buffer_dc, 0, 0, SRCCOPY);
+        } else paint_overlay(app, dc, rect);
+        EndPaint(window, &paint); return 0; }
     case WM_ERASEBKGND: return 1;
     }
     return DefWindowProcW(window, message, wparam, lparam);
@@ -386,5 +407,7 @@ int app_run(HINSTANCE instance, int show_command) {
     MSG message; while (GetMessageW(&message, NULL, 0, 0) > 0) { TranslateMessage(&message); DispatchMessageW(&message); }
     audio_dispose(&app.audio); system_metrics_dispose(&app.metrics);
     DestroyWindow(app.overlay_window); DestroyWindow(app.hit_window); DestroyWindow(app.settings_window);
+    if (app.overlay_buffer_bitmap) { SelectObject(app.overlay_buffer_dc, app.overlay_buffer_original); DeleteObject(app.overlay_buffer_bitmap); }
+    if (app.overlay_buffer_dc) DeleteDC(app.overlay_buffer_dc);
     DeleteObject(app.font); DeleteObject(app.small_font); DeleteObject(app.value_font); DeleteObject(app.system_value_font); DeleteObject(app.background_brush); return (int)message.wParam;
 }

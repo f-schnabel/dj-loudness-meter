@@ -17,6 +17,10 @@ typedef struct {
     HWND loudness_check, system_check, status_label, format_label, monitor_label;
     HFONT font, small_font, value_font, system_value_font;
     HBRUSH background_brush;
+    HDC overlay_buffer_dc;
+    HBITMAP overlay_buffer_bitmap;
+    HGDIOBJ overlay_buffer_original;
+    int overlay_buffer_width, overlay_buffer_height;
     AppSettings settings;
     AudioEngine audio;
     SystemMetrics metrics;
