@@ -43,7 +43,8 @@ public partial class MainWindow : Window
     private readonly CpuTemperatureService _cpuTemperatureService = new();
     private readonly SystemResourceService _systemResourceService = new();
     private bool _refreshingDevices;
-    private bool _taskbarMode;
+    private bool _applicationClosing;
+    private bool _initializingValueVisibility = true;
     private TaskbarOverlayWindow? _taskbarOverlay;
     private double _displayZeroDbfs;
     private double _normalWidth = 460;
@@ -51,10 +52,16 @@ public partial class MainWindow : Window
     private double _normalLeft = double.NaN;
     private double _normalTop = double.NaN;
     private long _lastSystemMetricsUpdate;
+    private bool _hasTemperature;
 
     public MainWindow()
     {
         _settings = _settingsService.Load();
+        if (!_settings.ShowLoudnessValues && !_settings.ShowSystemValues)
+        {
+            _settings.ShowLoudnessValues = true;
+        }
+
         _displayZeroDbfs = LoudnessDisplayScale.NormalizeReference(_settings.DisplayZeroDbfs);
         _captureService = new AudioCaptureService(TimeSpan.FromMilliseconds(Math.Clamp(_settings.PeakHoldMilliseconds, 0, 10000)));
         Devices = [];
@@ -69,6 +76,10 @@ public partial class MainWindow : Window
         _uiTimer.Tick += OnUiTimerTick;
         DisplayZeroTextBox.Text = FormatReference(_displayZeroDbfs);
         TaskbarSideComboBox.SelectedIndex = _settings.TaskbarRightAligned ? 1 : 0;
+        LoudnessValuesCheckBox.IsChecked = _settings.ShowLoudnessValues;
+        SystemValuesCheckBox.IsChecked = _settings.ShowSystemValues;
+        _initializingValueVisibility = false;
+        ApplyOverlayValueVisibility();
         RefreshIntervalSlider.Value = refreshMilliseconds;
         RefreshIntervalValue.Text = $"{refreshMilliseconds} ms";
         _settings.UiRefreshMilliseconds = refreshMilliseconds;
@@ -85,21 +96,19 @@ public partial class MainWindow : Window
     {
         RestoreWindowSettings();
         RefreshMonitors();
-        if (!_settings.TaskbarMode)
-        {
-            _normalWidth = Width;
-            _normalHeight = Height;
-        }
+        double contentHeight = ActualHeight;
+        SizeToContent = System.Windows.SizeToContent.Manual;
+        Height = Math.Max(MinHeight, contentHeight);
+        _normalWidth = ActualWidth;
+        _normalHeight = Height;
 
         RefreshDevices();
-        if (_settings.TaskbarMode)
-        {
-            SetTaskbarMode(true, initial: true);
-        }
-        else
-        {
-            SetNormalMode(initial: true);
-        }
+        ConfigureSettingsWindow();
+        CreateTaskbarOverlay();
+        PositionTaskbarWindow();
+        _taskbarOverlay?.Show();
+        Hide();
+        Dispatcher.BeginInvoke((Action)EnsureTaskbarZOrder, DispatcherPriority.Loaded);
         _uiTimer.Start();
     }
 
@@ -228,16 +237,18 @@ public partial class MainWindow : Window
         if (_lastSystemMetricsUpdate == 0 || now - _lastSystemMetricsUpdate >= SystemMetricsIntervalMilliseconds)
         {
             _lastSystemMetricsUpdate = now;
-            double? cpuTemperature = _cpuTemperatureService.ReadCelsius();
-            CompactCpuTemperatureValue.Text = FormatCompactTemperature(cpuTemperature);
-            bool hasTemperature = cpuTemperature is double temperature && double.IsFinite(temperature);
-            bool temperatureVisibilityChanged = (CompactTemperaturePanel.Visibility == Visibility.Visible) != hasTemperature;
-            CompactTemperaturePanel.Visibility = hasTemperature ? Visibility.Visible : Visibility.Collapsed;
-            TemperatureColumn.Width = hasTemperature ? new GridLength(46) : new GridLength(0);
-            SystemResourceSnapshot systemResources = _systemResourceService.Read();
-            CompactCpuUsageValue.Text = FormatPercentage(systemResources.CpuUsagePercent, compact: true);
-            CompactMemoryUsageValue.Text = FormatPercentage(systemResources.MemoryUsagePercent, compact: true);
-            if (_taskbarMode && (!_settings.TaskbarRightAligned || temperatureVisibilityChanged))
+            if (_settings.ShowSystemValues)
+            {
+                double? cpuTemperature = _cpuTemperatureService.ReadCelsius();
+                CompactCpuTemperatureValue.Text = FormatCompactTemperature(cpuTemperature);
+                _hasTemperature = cpuTemperature is double temperature && double.IsFinite(temperature);
+                SystemResourceSnapshot systemResources = _systemResourceService.Read();
+                CompactCpuUsageValue.Text = FormatPercentage(systemResources.CpuUsagePercent, compact: true);
+                CompactMemoryUsageValue.Text = FormatPercentage(systemResources.MemoryUsagePercent, compact: true);
+                ApplyOverlayValueVisibility();
+            }
+
+            if (_taskbarOverlay is not null)
             {
                 PositionTaskbarWindow();
             }
@@ -283,7 +294,7 @@ public partial class MainWindow : Window
         if (MonitorComboBox.SelectedItem is DisplayMonitor monitor)
         {
             _settings.TaskbarMonitorDeviceName = monitor.DeviceName;
-            if (_taskbarMode)
+            if (_taskbarOverlay is not null)
             {
                 PositionTaskbarWindow();
             }
@@ -293,10 +304,60 @@ public partial class MainWindow : Window
     private void OnTaskbarSideSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         _settings.TaskbarRightAligned = TaskbarSideComboBox.SelectedIndex == 1;
-        if (_taskbarMode)
+        if (_taskbarOverlay is not null)
         {
             PositionTaskbarWindow();
         }
+    }
+
+    private void OnValueVisibilityChanged(object sender, RoutedEventArgs e)
+    {
+        if (_initializingValueVisibility)
+        {
+            return;
+        }
+
+        bool showLoudness = LoudnessValuesCheckBox.IsChecked == true;
+        bool showSystem = SystemValuesCheckBox.IsChecked == true;
+        if (!showLoudness && !showSystem)
+        {
+            ((CheckBox)sender).IsChecked = true;
+            return;
+        }
+
+        _settings.ShowLoudnessValues = showLoudness;
+        _settings.ShowSystemValues = showSystem;
+        ApplyOverlayValueVisibility();
+        if (_taskbarOverlay is not null)
+        {
+            PositionTaskbarWindow();
+        }
+    }
+
+    private void ApplyOverlayValueVisibility()
+    {
+        bool showLoudness = _settings.ShowLoudnessValues;
+        bool showSystem = _settings.ShowSystemValues;
+        GridLength loudnessWidth = showLoudness ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        PeakColumn.Width = loudnessWidth;
+        HoldColumn.Width = loudnessWidth;
+        MomentaryColumn.Width = loudnessWidth;
+        ShortTermColumn.Width = loudnessWidth;
+        CompactPeakPanel.Visibility = showLoudness ? Visibility.Visible : Visibility.Collapsed;
+        CompactHoldPanel.Visibility = showLoudness ? Visibility.Visible : Visibility.Collapsed;
+        CompactMomentaryPanel.Visibility = showLoudness ? Visibility.Visible : Visibility.Collapsed;
+        CompactShortTermPanel.Visibility = showLoudness ? Visibility.Visible : Visibility.Collapsed;
+
+        bool showSeparator = showLoudness && showSystem;
+        SeparatorColumn.Width = showSeparator ? new GridLength(13) : new GridLength(0);
+        CompactSeparator.Visibility = showSeparator ? Visibility.Visible : Visibility.Collapsed;
+        bool showTemperature = showSystem && _hasTemperature;
+        TemperatureColumn.Width = showTemperature ? new GridLength(46) : new GridLength(0);
+        CompactTemperaturePanel.Visibility = showTemperature ? Visibility.Visible : Visibility.Collapsed;
+        CpuColumn.Width = showSystem ? new GridLength(46) : new GridLength(0);
+        MemoryColumn.Width = showSystem ? new GridLength(46) : new GridLength(0);
+        CompactCpuPanel.Visibility = showSystem ? Visibility.Visible : Visibility.Collapsed;
+        CompactMemoryPanel.Visibility = showSystem ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void OnRefreshIntervalChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -363,52 +424,33 @@ public partial class MainWindow : Window
         UpdateThresholdTooltips();
     }
 
-    private void OnTaskbarClick(object sender, RoutedEventArgs e) => SetTaskbarMode(true);
-
-    private void SetNormalMode(bool initial = false)
+    private void ConfigureSettingsWindow()
     {
-        bool wasTaskbar = _taskbarMode;
-        _taskbarMode = false;
         ShowInTaskbar = true;
         Topmost = false;
-        SetStripVisibility(false);
         WindowStyle = WindowStyle.SingleBorderWindow;
         ResizeMode = ResizeMode.CanResize;
         MinWidth = 400;
         MinHeight = 360;
         MainRoot.Margin = new Thickness(16);
-        if (wasTaskbar && !initial)
+    }
+
+    private void ShowSettingsWindow()
+    {
+        if (!IsVisible)
         {
             Width = Math.Max(_normalWidth, MinWidth);
             Height = Math.Max(_normalHeight, MinHeight);
             RestoreNormalPosition();
-        }
-    }
-
-    private void SetTaskbarMode(bool taskbar, bool initial = false)
-    {
-        if (!taskbar)
-        {
-            CloseTaskbarOverlay(restoreContent: true);
-            SetNormalMode(initial);
             Show();
-            Activate();
-            return;
         }
 
-        if (!_taskbarMode && !initial)
+        if (WindowState == WindowState.Minimized)
         {
-            RememberNormalBounds();
+            WindowState = WindowState.Normal;
         }
 
-        _taskbarMode = true;
-        SetStripVisibility(true);
-        ShowInTaskbar = false;
-        CreateTaskbarOverlay();
-        PositionTaskbarWindow();
-        _taskbarOverlay?.Show();
-        Hide();
-        Dispatcher.BeginInvoke((Action)EnsureTaskbarZOrder, DispatcherPriority.Loaded);
+        Activate();
     }
 
     private void CreateTaskbarOverlay()
@@ -418,6 +460,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        CompactMeasurements.Visibility = Visibility.Visible;
         MainRoot.Children.Remove(CompactMeasurements);
         _taskbarOverlay = new TaskbarOverlayWindow(CompactMeasurements);
         _taskbarOverlay.RestoreRequested += OnTaskbarRestoreRequested;
@@ -442,16 +485,14 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnTaskbarRestoreRequested(object? sender, EventArgs e) => SetTaskbarMode(false);
+    private void OnTaskbarRestoreRequested(object? sender, EventArgs e) => ShowSettingsWindow();
 
-    private void OnTaskbarCloseRequested(object? sender, EventArgs e) => Close();
+    private void OnTaskbarCloseRequested(object? sender, EventArgs e) => CloseApplication();
 
-    private void RememberNormalBounds()
+    internal void CloseApplication()
     {
-        _normalWidth = ActualWidth;
-        _normalHeight = ActualHeight;
-        _normalLeft = Left;
-        _normalTop = Top;
+        _applicationClosing = true;
+        Close();
     }
 
     private void RestoreNormalPosition()
@@ -516,7 +557,24 @@ public partial class MainWindow : Window
             target.Top = bounds.Bottom - taskbarHeight;
         }
 
-        double overlayWidth = CompactTemperaturePanel.Visibility == Visibility.Visible ? 406 : 360;
+        double overlayWidth = 0;
+        if (_settings.ShowLoudnessValues)
+        {
+            overlayWidth += 255;
+        }
+        if (_settings.ShowSystemValues)
+        {
+            overlayWidth += 92;
+            if (_hasTemperature)
+            {
+                overlayWidth += 46;
+            }
+        }
+        if (_settings.ShowLoudnessValues && _settings.ShowSystemValues)
+        {
+            overlayWidth += 13;
+        }
+
         target.Width = Math.Min(overlayWidth, bounds.Width);
         target.Height = Math.Max(32, taskbarHeight);
         if (_settings.TaskbarRightAligned)
@@ -572,7 +630,7 @@ public partial class MainWindow : Window
 
     private void EnsureTaskbarZOrder()
     {
-        if (!_taskbarMode)
+        if (_taskbarOverlay is null)
         {
             return;
         }
@@ -590,13 +648,6 @@ public partial class MainWindow : Window
                 0,
                 SwpNoMove | SwpNoSize | SwpNoActivate | SwpShowWindow);
         }
-    }
-    private void SetStripVisibility(bool strip)
-    {
-        HeaderPanel.Visibility = strip ? Visibility.Collapsed : Visibility.Visible;
-        SettingsPanel.Visibility = strip ? Visibility.Collapsed : Visibility.Visible;
-        StatusPanel.Visibility = strip ? Visibility.Collapsed : Visibility.Visible;
-        CompactMeasurements.Visibility = strip ? Visibility.Visible : Visibility.Collapsed;
     }
     private void SetReadingColors(MeterSnapshot snapshot)
     {
@@ -640,31 +691,33 @@ public partial class MainWindow : Window
         {
             StatusPanel.Visibility = Visibility.Visible;
         }
-        else if (_taskbarMode)
+        else
         {
-            StatusPanel.Visibility = Visibility.Collapsed;
+            StatusPanel.Visibility = Visibility.Visible;
         }
     }
 
     private void OnClosing(object? sender, CancelEventArgs e)
     {
+        if (!_applicationClosing)
+        {
+            e.Cancel = true;
+            Hide();
+            return;
+        }
+
         CloseTaskbarOverlay(restoreContent: false);
         _uiTimer.Stop();
         _captureService.CaptureStopped -= OnCaptureStopped;
         _captureService.Dispose();
         _cpuTemperatureService.Dispose();
 
-        if (!_taskbarMode)
-        {
-            _settings.WindowLeft = Left;
-            _settings.WindowTop = Top;
-            _settings.WindowWidth = ActualWidth;
-            _settings.WindowHeight = ActualHeight;
-        }
+        _settings.WindowLeft = Left;
+        _settings.WindowTop = Top;
+        _settings.WindowWidth = ActualWidth;
+        _settings.WindowHeight = ActualHeight;
 
         _settings.AlwaysOnTop = false;
-        _settings.CompactMode = false;
-        _settings.TaskbarMode = _taskbarMode;
         _settings.TaskbarMonitorDeviceName = (MonitorComboBox.SelectedItem as DisplayMonitor)?.DeviceName;
         _settings.TaskbarRightAligned = TaskbarSideComboBox.SelectedIndex == 1;
         _settings.UiRefreshMilliseconds = (int)_uiTimer.Interval.TotalMilliseconds;

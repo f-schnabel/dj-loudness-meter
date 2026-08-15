@@ -8,10 +8,10 @@ public sealed class AppSettings
     public double WindowWidth { get; set; } = 460;
     public double WindowHeight { get; set; } = 410;
     public bool AlwaysOnTop { get; set; }
-    public bool CompactMode { get; set; }
-    public bool TaskbarMode { get; set; }
     public string? TaskbarMonitorDeviceName { get; set; }
     public bool TaskbarRightAligned { get; set; }
+    public bool ShowLoudnessValues { get; set; } = true;
+    public bool ShowSystemValues { get; set; } = true;
     public int UiRefreshMilliseconds { get; set; } = 500;
     public int PeakHoldMilliseconds { get; set; } = 5000;
     public double DisplayZeroDbfs { get; set; } = -9.0;

@@ -10,6 +10,7 @@
         Height="410"
         MinWidth="400"
         MinHeight="360"
+        SizeToContent="Height"
         WindowStartupLocation="CenterScreen"
         Closing="OnClosing"
         Loaded="OnLoaded">
@@ -21,15 +22,10 @@
     </Grid.RowDefinitions>
 
     <Grid x:Name="HeaderPanel" Grid.Row="0" Margin="0,0,0,12">
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="Auto" />
-      </Grid.ColumnDefinitions>
       <StackPanel VerticalAlignment="Center">
         <TextBlock Text="TASKBAR METER" FontSize="20" FontWeight="SemiBold" />
         <TextBlock Text="Overlay settings" Foreground="{StaticResource SecondaryTextBrush}" FontSize="11" />
       </StackPanel>
-      <Button Grid.Column="1" Content="Show in taskbar" Padding="12,6" Click="OnTaskbarClick" />
     </Grid>
 
     <Border x:Name="StatusPanel" Grid.Row="1" Background="{StaticResource PanelBrush}" CornerRadius="5" Padding="9,6" Margin="0,0,0,12">
@@ -66,6 +62,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
 
           <TextBlock Text="Side" Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center" />
@@ -87,21 +84,27 @@
           <Slider x:Name="RefreshIntervalSlider" Grid.Row="3" Grid.Column="1" Minimum="50" Maximum="2000" Ticks="50,125,250,500,750,1000,1250,1500,1750,2000" IsSnapToTickEnabled="True" Margin="0,10,10,0" ValueChanged="OnRefreshIntervalChanged" />
           <TextBlock x:Name="RefreshIntervalValue" Grid.Row="3" Grid.Column="2" Width="58" TextAlignment="Right" VerticalAlignment="Center" Margin="0,10,0,0" />
 
-          <Button Grid.Row="4" Grid.Column="2" Content="Reset meter" Margin="0,10,0,0" Click="OnResetClick" />
+          <TextBlock Grid.Row="4" Text="Values" Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center" Margin="0,10,0,0" />
+          <StackPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,10,0,0">
+            <CheckBox x:Name="LoudnessValuesCheckBox" Content="Loudness" Checked="OnValueVisibilityChanged" Unchecked="OnValueVisibilityChanged" />
+            <CheckBox x:Name="SystemValuesCheckBox" Content="System" Margin="14,0,0,0" Checked="OnValueVisibilityChanged" Unchecked="OnValueVisibilityChanged" />
+          </StackPanel>
+
+          <Button Grid.Row="5" Grid.Column="2" Content="Reset meter" Margin="0,10,0,0" Click="OnResetClick" />
         </Grid>
       </GroupBox>
     </StackPanel>
 
     <Grid x:Name="CompactMeasurements" Grid.Row="0" Grid.RowSpan="3" Background="Transparent" Visibility="Collapsed" VerticalAlignment="Center">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="13" />
+        <ColumnDefinition x:Name="PeakColumn" Width="*" />
+        <ColumnDefinition x:Name="HoldColumn" Width="*" />
+        <ColumnDefinition x:Name="MomentaryColumn" Width="*" />
+        <ColumnDefinition x:Name="ShortTermColumn" Width="*" />
+        <ColumnDefinition x:Name="SeparatorColumn" Width="13" />
         <ColumnDefinition x:Name="TemperatureColumn" Width="0" />
-        <ColumnDefinition Width="46" />
-        <ColumnDefinition Width="46" />
+        <ColumnDefinition x:Name="CpuColumn" Width="46" />
+        <ColumnDefinition x:Name="MemoryColumn" Width="46" />
       </Grid.ColumnDefinitions>
 
       <StackPanel x:Name="CompactPeakPanel" Grid.Column="0" VerticalAlignment="Center">
@@ -120,16 +123,16 @@
         <TextBlock Text="LUFS (3s)" Foreground="{StaticResource SecondaryTextBrush}" FontSize="8.5" FontWeight="SemiBold" TextAlignment="Right" Margin="0,0,5,0" />
         <TextBlock x:Name="CompactShortTermValue" Text="−∞" Foreground="{StaticResource PrimaryTextBrush}" FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="16" FontWeight="Normal" TextAlignment="Right" Margin="0,0,5,0" />
       </StackPanel>
-      <Border Grid.Column="4" Width="1" Height="22" Background="#3C464E" HorizontalAlignment="Center" VerticalAlignment="Center" />
+      <Border x:Name="CompactSeparator" Grid.Column="4" Width="1" Height="22" Background="#3C464E" HorizontalAlignment="Center" VerticalAlignment="Center" />
       <StackPanel x:Name="CompactTemperaturePanel" Grid.Column="5" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" ToolTip="Windows ACPI thermal-zone temperature">
         <TextBlock Text="Temp" Foreground="{StaticResource SecondaryTextBrush}" FontSize="8.5" FontWeight="SemiBold" HorizontalAlignment="Center" />
         <TextBlock x:Name="CompactCpuTemperatureValue" Text="N/A" Foreground="{StaticResource PrimaryTextBrush}" FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="14" FontWeight="Normal" HorizontalAlignment="Center" />
       </StackPanel>
-      <StackPanel Grid.Column="6" HorizontalAlignment="Center" VerticalAlignment="Center" ToolTip="Total system CPU utilization">
+      <StackPanel x:Name="CompactCpuPanel" Grid.Column="6" HorizontalAlignment="Center" VerticalAlignment="Center" ToolTip="Total system CPU utilization">
         <TextBlock Text="CPU" Foreground="{StaticResource SecondaryTextBrush}" FontSize="8.5" FontWeight="SemiBold" HorizontalAlignment="Center" />
         <TextBlock x:Name="CompactCpuUsageValue" Text="N/A" Foreground="{StaticResource PrimaryTextBrush}" FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="14" FontWeight="Normal" HorizontalAlignment="Center" />
       </StackPanel>
-      <StackPanel Grid.Column="7" HorizontalAlignment="Center" VerticalAlignment="Center" ToolTip="Physical memory utilization">
+      <StackPanel x:Name="CompactMemoryPanel" Grid.Column="7" HorizontalAlignment="Center" VerticalAlignment="Center" ToolTip="Physical memory utilization">
         <TextBlock Text="RAM" Foreground="{StaticResource SecondaryTextBrush}" FontSize="8.5" FontWeight="SemiBold" HorizontalAlignment="Center" />
         <TextBlock x:Name="CompactMemoryUsageValue" Text="N/A" Foreground="{StaticResource PrimaryTextBrush}" FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="14" FontWeight="Normal" HorizontalAlignment="Center" />
       </StackPanel>

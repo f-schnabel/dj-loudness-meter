@@ -25,6 +25,9 @@
     <Style TargetType="ComboBox">
       <Setter Property="Padding" Value="6,4" />
     </Style>
+    <Style TargetType="CheckBox">
+      <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+    </Style>
     <Style TargetType="TextBox">
       <Setter Property="Padding" Value="5,3" />
       <Setter Property="Background" Value="#20262B" />

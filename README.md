@@ -1,16 +1,22 @@
 # DJ Loudness Meter
 
+<p align="center">
+  <img src="DjLoudnessMeter/Assets/DjLoudnessMeter.ico" alt="DJ Loudness Meter icon" width="96" />
+</p>
+
 A small Windows 10/11 x64 WPF meter for the playback device receiving Rekordbox **PC MASTER OUT**. It observes the selected render endpoint through WASAPI loopback; it does not route, record, retransmit, or modify audio and therefore does not sit in the playback path.
+
+![DJ Loudness Meter taskbar overlay](docs/taskbar-overlay.png)
 
 The UI contains stereo sample peak, peak hold, clip state, LUFS-M, LUFS-S, a low-overhead Windows ACPI thermal-zone temperature, total CPU/RAM usage, a large dB-scaled master meter, and playback-device selection. There is deliberately no FFT, spectrum, waveform, recording, Rekordbox integration, or raw audio history.
 
-Taskbar mode is a transparent numeric strip labeled P (update interval), P (5s), LUFS (0.4s), LUFS (3s), Temp, CPU, and RAM. Temp is hidden when Windows exposes no ACPI thermal zone. The update interval offers 50, 125, and 250–2000 ms options and defaults to 500 ms. The first peak reports the maximum captured during each update interval and P (5s) holds the peak for five seconds. Double-click the strip to return to settings. Peak values turn amber at −6 dBFS and red at −1 dBFS; LUFS values turn amber at −12 LUFS and red at −9 LUFS. Five seconds of digital silence clears Peak, Hold, LUFS, and the clip state to −∞.
+The app displays a persistent transparent taskbar strip labeled P (update interval), P (5s), LUFS (0.4s), LUFS (3s), Temp, CPU, and RAM. Temp is hidden when Windows exposes no ACPI thermal zone. The update interval offers 50, 125, and 250–2000 ms options and defaults to 500 ms. The first peak reports the maximum captured during each update interval and P (5s) holds the peak for five seconds. Double-click the strip to open settings without hiding it. Peak values turn amber at −6 dBFS and red at −1 dBFS; LUFS values turn amber at −12 LUFS and red at −9 LUFS. Five seconds of digital silence clears Peak, Hold, LUFS, and the clip state to −∞.
 
 The settings window's **Display zero** field configures a display reference from −30 to 0 dBFS and defaults to −9 dBFS. At `-9`, the meter adds 9 dB to P/H/S/M, so a raw −9 dB value reads 0 dB and a raw 0 dB value reads +9 dB. Numeric warning thresholds shift by the same amount. A value of `0` restores the unadjusted readings.
 
 Adjusted P/H/LUFS values display down to −99.0 dB. Values below −99.0 dB are rendered as −∞.
 
-Taskbar mode places the strip on the selected monitor and taskbar side without injecting into Windows Explorer. Double-click the strip to return to settings or right-click it to close the app.
+The taskbar strip stays visible on the selected monitor and side without injecting into Windows Explorer. Loudness and system values can be shown together or independently. Double-click the strip to open settings without hiding it, or right-click it to close the app.
 
 ## Requirements
 
@@ -58,7 +64,7 @@ WASAPI loopback observes everything rendered to the selected endpoint, not Rekor
 - libebur128 uses only `EBUR128_MODE_S`, which includes Momentary support. Integrated loudness, LRA, sample-peak, and true-peak modes are not enabled.
 - The WPF timer samples the latest state, Windows thermal-zone counter, total CPU utilization, and physical-memory utilization at the configured interval (500 ms by default). The temperature read does not require HWiNFO or another monitoring process.
 - If loopback stops producing packets, the visual meter decays immediately and LUFS/peak values become silence after five seconds. Capture remains armed and resumes automatically.
-- Taskbar mode is a transparent topmost overlay on the selected side and monitor; it does not inject into Windows Explorer.
+- The taskbar strip is a transparent topmost overlay on the selected side and monitor; it does not inject into Windows Explorer.
 - Settings, including the display-zero reference, are stored in a small JSON file under the application data DjLoudnessMeter folder.
 
 ## Accuracy and endurance validation

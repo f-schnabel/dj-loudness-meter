@@ -23,6 +23,15 @@ public sealed class AppSettingsTests
     }
 
     [Fact]
+    public void ValueGroupsDefaultToVisible()
+    {
+        AppSettings settings = new();
+
+        Assert.True(settings.ShowLoudnessValues);
+        Assert.True(settings.ShowSystemValues);
+    }
+
+    [Fact]
     public void UiRefreshDefaultsToFiveHundredMilliseconds()
     {
         Assert.Equal(500, new AppSettings().UiRefreshMilliseconds);

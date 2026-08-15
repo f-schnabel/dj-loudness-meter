@@ -41,9 +41,9 @@ public partial class App : Application
 
         Dispatcher.BeginInvoke(() =>
         {
-            if (MainWindow is Window window)
+            if (MainWindow is UI.MainWindow window)
             {
-                window.Close();
+                window.CloseApplication();
             }
             else
             {

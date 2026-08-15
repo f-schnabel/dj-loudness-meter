@@ -22,9 +22,11 @@ public sealed class TaskbarOverlayWindow : Window
         ResizeMode = ResizeMode.NoResize;
         WindowStartupLocation = WindowStartupLocation.Manual;
 
+        MenuItem settingsItem = new() { Header = "Open settings" };
+        settingsItem.Click += (_, _) => RestoreRequested?.Invoke(this, EventArgs.Empty);
         MenuItem closeItem = new() { Header = "Close" };
         closeItem.Click += (_, _) => CloseRequested?.Invoke(this, EventArgs.Empty);
-        ContextMenu = new ContextMenu { Items = { closeItem } };
+        ContextMenu = new ContextMenu { Items = { settingsItem, closeItem } };
         MouseDoubleClick += OnMouseDoubleClick;
         Closing += OnClosing;
     }
