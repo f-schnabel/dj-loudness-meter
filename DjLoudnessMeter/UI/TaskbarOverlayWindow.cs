@@ -13,7 +13,8 @@ public sealed class TaskbarOverlayWindow : Window
     public TaskbarOverlayWindow(FrameworkElement content)
     {
         AllowsTransparency = true;
-        Background = Brushes.Transparent;
+        Background = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0));
+        content.VerticalAlignment = VerticalAlignment.Stretch;
         Content = content;
         ShowInTaskbar = false;
         Topmost = true;

@@ -1,12 +1,15 @@
+using Microsoft.Win32;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
+using System.Windows.Automation;
 
 namespace DjLoudnessMeter.UI;
 
 public sealed record DisplayMonitor(string DeviceName, string FriendlyName, Rect Bounds, Rect WorkArea, bool IsPrimary)
 {
     private const uint MonitorInfoPrimary = 0x00000001;
+    private const string ExplorerAdvancedKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
 
     public static IReadOnlyList<DisplayMonitor> GetAll()
     {
@@ -92,6 +95,70 @@ public sealed record DisplayMonitor(string DeviceName, string FriendlyName, Rect
 
         EnumWindows(callback, IntPtr.Zero);
         return result;
+    }
+
+    public static double? GetTaskbarSafeLeft(string monitorDeviceName)
+    {
+        if (!AreWidgetsEnabled())
+        {
+            return null;
+        }
+
+        double? result = null;
+        WindowEnumProc callback = (window, _) =>
+        {
+            if (!IsTaskbarOnMonitor(window, monitorDeviceName))
+            {
+                return true;
+            }
+
+            try
+            {
+                AutomationElement? widgetsButton = AutomationElement.FromHandle(window).FindFirst(
+                    TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.AutomationIdProperty, "WidgetsButton"));
+                Rect bounds = widgetsButton?.Current.BoundingRectangle ?? Rect.Empty;
+                if (!bounds.IsEmpty && bounds.Width > 0)
+                {
+                    result = bounds.Right;
+                }
+            }
+            catch (ElementNotAvailableException)
+            {
+                // Explorer can rebuild the taskbar while it is being queried.
+            }
+            catch (COMException)
+            {
+                // The taskbar's XAML island can disappear during an Explorer refresh.
+            }
+
+            return result is null;
+        };
+
+        EnumWindows(callback, IntPtr.Zero);
+        return result;
+    }
+
+    private static bool AreWidgetsEnabled()
+    {
+        using RegistryKey? key = Registry.CurrentUser.OpenSubKey(ExplorerAdvancedKey);
+        object? value = key?.GetValue("TaskbarDa");
+        return value is int enabled ? enabled != 0 : value?.ToString() == "1";
+    }
+
+    private static bool IsTaskbarOnMonitor(IntPtr window, string monitorDeviceName)
+    {
+        StringBuilder className = new(64);
+        GetClassName(window, className, className.Capacity);
+        if (className.ToString() is not ("Shell_TrayWnd" or "Shell_SecondaryTrayWnd"))
+        {
+            return false;
+        }
+
+        IntPtr monitor = MonitorFromWindow(window, 2);
+        MonitorInfoEx monitorInfo = new() { Size = Marshal.SizeOf<MonitorInfoEx>() };
+        return GetMonitorInfo(monitor, ref monitorInfo) &&
+            string.Equals(monitorInfo.DeviceName, monitorDeviceName, StringComparison.OrdinalIgnoreCase);
     }
 
     private static Rect ToRect(NativeRect rect) =>

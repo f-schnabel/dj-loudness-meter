@@ -7,12 +7,14 @@ namespace DjLoudnessMeter;
 
 public partial class App : Application
 {
+    private const uint AttachParentProcess = 0xFFFFFFFF;
     private ConsoleControlHandler? _consoleControlHandler;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         AppLog.Info("Application starting.");
         DispatcherUnhandledException += OnDispatcherUnhandledException;
+        AttachConsole(AttachParentProcess);
         _consoleControlHandler = OnConsoleControl;
         SetConsoleCtrlHandler(_consoleControlHandler, add: true);
         base.OnStartup(e);
@@ -69,6 +71,10 @@ public partial class App : Application
         CtrlC = 0,
         CtrlBreak = 1
     }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AttachConsole(uint processId);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

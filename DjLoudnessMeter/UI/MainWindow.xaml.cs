@@ -234,14 +234,13 @@ public partial class MainWindow : Window
             bool temperatureVisibilityChanged = (CompactTemperaturePanel.Visibility == Visibility.Visible) != hasTemperature;
             CompactTemperaturePanel.Visibility = hasTemperature ? Visibility.Visible : Visibility.Collapsed;
             TemperatureColumn.Width = hasTemperature ? new GridLength(46) : new GridLength(0);
-            if (temperatureVisibilityChanged && _taskbarMode)
-            {
-                PositionTaskbarWindow();
-            }
-
             SystemResourceSnapshot systemResources = _systemResourceService.Read();
             CompactCpuUsageValue.Text = FormatPercentage(systemResources.CpuUsagePercent, compact: true);
             CompactMemoryUsageValue.Text = FormatPercentage(systemResources.MemoryUsagePercent, compact: true);
+            if (_taskbarMode && (!_settings.TaskbarRightAligned || temperatureVisibilityChanged))
+            {
+                PositionTaskbarWindow();
+            }
         }
         SetReadingColors(snapshot);
         if (snapshot.IsConnected && !snapshot.HasRecentAudio && StatusText.Foreground != ErrorBrush)
@@ -517,7 +516,7 @@ public partial class MainWindow : Window
             target.Top = bounds.Bottom - taskbarHeight;
         }
 
-        double overlayWidth = CompactTemperaturePanel.Visibility == Visibility.Visible ? 430 : 384;
+        double overlayWidth = CompactTemperaturePanel.Visibility == Visibility.Visible ? 406 : 360;
         target.Width = Math.Min(overlayWidth, bounds.Width);
         target.Height = Math.Max(32, taskbarHeight);
         if (_settings.TaskbarRightAligned)
@@ -531,7 +530,23 @@ public partial class MainWindow : Window
         }
         else
         {
-            target.Left = bounds.Left;
+            double? taskbarSafeLeft = DisplayMonitor.GetTaskbarSafeLeft(monitor.DeviceName);
+            bool followsWidgets = taskbarSafeLeft is not null;
+            HorizontalAlignment metricAlignment = followsWidgets
+                ? HorizontalAlignment.Left
+                : HorizontalAlignment.Stretch;
+            Thickness metricMargin = followsWidgets ? new Thickness(2, 0, 0, 0) : default;
+            CompactPeakPanel.HorizontalAlignment = metricAlignment;
+            CompactHoldPanel.HorizontalAlignment = metricAlignment;
+            CompactMomentaryPanel.HorizontalAlignment = metricAlignment;
+            CompactShortTermPanel.HorizontalAlignment = metricAlignment;
+            CompactPeakPanel.Margin = metricMargin;
+            CompactHoldPanel.Margin = metricMargin;
+            CompactMomentaryPanel.Margin = metricMargin;
+            CompactShortTermPanel.Margin = metricMargin;
+            target.Left = taskbarSafeLeft is double physicalLeft
+                ? Math.Max(bounds.Left, ToWpfX(physicalLeft) + 2)
+                : bounds.Left;
         }
     }
 
