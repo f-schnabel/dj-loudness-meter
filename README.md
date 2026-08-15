@@ -1,31 +1,35 @@
 # DJ Loudness Meter
 
 <p align="center">
-  <img src="DjLoudnessMeter/Assets/DjLoudnessMeter.ico" alt="DJ Loudness Meter icon" width="96" />
+  <img src="assets/DjLoudnessMeter.ico" alt="DJ Loudness Meter icon" width="96" />
 </p>
 
-A small Windows 10/11 x64 WPF meter for the playback device receiving Rekordbox **PC MASTER OUT**. It observes the selected render endpoint through WASAPI loopback; it does not route, record, retransmit, or modify audio and therefore does not sit in the playback path.
+A lightweight native Windows taskbar meter for the playback device receiving Rekordbox **PC MASTER OUT**. It uses WASAPI loopback and does not route, record, retransmit, or modify audio.
 
 ![DJ Loudness Meter taskbar overlay](docs/taskbar-overlay.png)
 
-The UI contains stereo sample peak, peak hold, clip state, LUFS-M, LUFS-S, a low-overhead Windows ACPI thermal-zone temperature, total CPU/RAM usage, a large dB-scaled master meter, and playback-device selection. There is deliberately no FFT, spectrum, waveform, recording, Rekordbox integration, or raw audio history.
+The transparent taskbar overlay shows sample peak, five-second peak hold, LUFS-M, LUFS-S, ACPI thermal-zone temperature when available, total CPU usage, and physical RAM usage. Double-click it for settings or right-click it to open settings or exit.
 
-The app displays a persistent transparent taskbar strip labeled P (update interval), P (5s), LUFS (0.4s), LUFS (3s), Temp, CPU, and RAM. Temp is hidden when Windows exposes no ACPI thermal zone. The update interval offers 10, 50, 125, and 250–2000 ms options and defaults to 500 ms. The first peak reports the maximum captured during each update interval and P (5s) holds the peak for five seconds. Double-click the strip to open settings without hiding it. Peak values turn amber at −6 dBFS and red at −1 dBFS; LUFS values turn amber at −12 LUFS and red at −9 LUFS. Five seconds of digital silence clears Peak, Hold, LUFS, and the clip state to −∞.
+## Runtime design
 
-The settings window's **Display zero** field configures a display reference from −30 to 0 dBFS and defaults to −9 dBFS. At `-9`, the meter adds 9 dB to P/H/S/M, so a raw −9 dB value reads 0 dB and a raw 0 dB value reads +9 dB. Numeric warning thresholds shift by the same amount. A value of `0` restores the unadjusted readings.
+- Pure C17 and Win32; no .NET, WPF, raylib, or GUI framework
+- Event-driven WASAPI shared-mode loopback capture
+- Native `libebur128` short-term and momentary loudness measurement
+- One UI thread and one MMCSS audio thread
+- UI repaints only at the selected 10–2000 ms interval
+- CPU/RAM/temperature telemetry sampled no faster than every 500 ms
+- Unavailable temperature telemetry disables itself after the first failed PDH read
+- Float audio is metered without conversion; PCM uses one reusable buffer
+- No FFT, waveform, recording, raw audio history, or growing work queue
 
-Adjusted P/H/LUFS values display down to −99.0 dB. Values below −99.0 dB are rendered as −∞.
-
-The taskbar strip stays visible on the selected monitor and side without injecting into Windows Explorer. Loudness and system values can be shown together or independently. Double-click the strip to open settings without hiding it, or right-click it to close the app.
+The settings window provides playback-device and monitor selection, left/right placement, display-zero reference, update-rate slider, loudness/system checkboxes, device refresh, and meter reset. Settings remain compatible with the previous JSON file under `%APPDATA%\DjLoudnessMeter`.
 
 ## Requirements
 
 - Windows 10 2004 or newer, or Windows 11, x64
-- .NET 9 SDK for development
-- Visual Studio 2022 Build Tools with the C++ workload plus [vcpkg](https://github.com/microsoft/vcpkg) to build the native dependency
-- NAudio 3 (`WasapiRecorder`) and libebur128 1.2.6
-
-NAudio 3 is currently a prerelease package. The project pins `3.0.0-preview.19`, whose modern recorder provides the span-based, zero-copy callback used here.
+- Visual Studio 2022 with Desktop development with C++
+- CMake 3.24+
+- vcpkg for `libebur128`
 
 ## Build
 
@@ -33,48 +37,39 @@ Set `VCPKG_ROOT` to a bootstrapped vcpkg checkout, then run:
 
 ```powershell
 ./scripts/Build-Native.ps1
-dotnet test DjLoudnessMeter.sln -c Release -p:Platform=x64
-dotnet run --project DjLoudnessMeter/DjLoudnessMeter.csproj -c Release
 ```
 
-`Build-Native.ps1` builds the official MIT-licensed libebur128 port and copies only `ebur128.dll` into the application's RID-specific native directory. The DLL is intentionally not committed to source control.
+The executable and `ebur128.dll` are written to `build\Release`.
 
-Create a self-contained Windows x64 distribution with:
+For a release directory:
 
 ```powershell
 ./scripts/Publish.ps1
 ```
 
-The release workflow performs the same native build, DSP tests, and publish process on a Windows runner.
-
 ## Rekordbox setup
 
-1. In Rekordbox, keep the controller (for example, DDJ-400) as the main audio device.
-2. Enable **PC MASTER OUT** and choose a Windows playback endpoint.
-3. Start DJ Loudness Meter and select that same Windows endpoint.
-4. Play audio. The status changes from “waiting for audio” when loopback packets arrive.
+1. Keep the controller as Rekordbox's main audio device.
+2. Enable **PC MASTER OUT** and select a Windows playback endpoint.
+3. Select the same endpoint in DJ Loudness Meter.
+4. Play audio.
 
-WASAPI loopback observes everything rendered to the selected endpoint, not Rekordbox alone. Avoid routing unrelated system sounds to that endpoint during a set if they should not affect the meter.
+WASAPI loopback observes everything rendered to that endpoint, not Rekordbox alone.
 
-## Design notes
+## Meter behavior
 
-- Shared-mode loopback uses `WasapiRecorderBuilder.WithDevice(...).WithLoopbackCapture()` with a 100 ms buffer. Low-latency mode is not enabled.
-- IEEE float input is passed to metering without a conversion copy. PCM 16/24/32 uses one reusable growth-only float buffer.
-- The capture callback calculates interval sample peaks and feeds libebur128. It never dispatches UI work, performs file I/O, uses LINQ, or retains raw samples.
-- libebur128 uses only `EBUR128_MODE_S`, which includes Momentary support. Integrated loudness, LRA, sample-peak, and true-peak modes are not enabled.
-- The WPF timer samples the latest state, Windows thermal-zone counter, total CPU utilization, and physical-memory utilization at the configured interval (500 ms by default). The temperature read does not require HWiNFO or another monitoring process.
-- If loopback stops producing packets, the visual meter decays immediately and LUFS/peak values become silence after five seconds. Capture remains armed and resumes automatically.
-- The taskbar strip is a transparent topmost overlay on the selected side and monitor; it does not inject into Windows Explorer.
-- Settings, including the display-zero reference, are stored in a small JSON file under the application data DjLoudnessMeter folder.
+- The first peak is the maximum captured during the configured display interval.
+- Peak hold lasts five seconds and then decays at 18 dB/s.
+- Peak values turn amber at -6 dBFS and red at -1 dBFS.
+- LUFS values turn amber at -12 LUFS and red at -9 LUFS.
+- Five seconds of digital silence clears peak, hold, clip, and loudness state.
+- **Display zero** accepts -30 to 0 dBFS. At `-9`, a raw -9 dB reading displays as 0 dB.
+- Adjusted values below -99 dB display as negative infinity.
 
-## Accuracy and endurance validation
+## Validation
 
-Automated tests cover silence, stereo channel separation, known 0/−3/−6/−12 dBFS sine peaks, PCM 16/24/32 conversion, 44.1/48 kHz loudness integration, and a known steady stereo sine loudness. Native loudness tests run after `Build-Native.ps1` has supplied `ebur128.dll`.
-
-Before publishing a release, also run the Release build with music for at least 30 minutes and inspect CPU, working set, allocation rate, UI render activity, and capture-thread timing in Visual Studio Profiler or PerfView. The implementation has no growing queue or application-owned audio history, but an endurance profile on the target audio driver is still required.
-
-For the manual Rekordbox check, verify that channel TRIM, EQ, track pausing/resuming, and mixing two tracks change the readings as expected. Changing the controller's physical analog master level should not alter the digital PC MASTER OUT copy being measured.
+Native tests cover stereo peak separation, clipping, PCM 16/24/32 conversion, display-zero adjustment, clamping, and the display floor. Before release, run the meter with music for at least 30 minutes and inspect working set, handles, CPU time, and capture continuity on the target audio driver.
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Third-party licenses are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+MIT. See [LICENSE](LICENSE) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

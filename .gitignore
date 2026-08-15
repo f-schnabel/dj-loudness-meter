@@ -1,11 +1,10 @@
 bin/
 obj/
+build/
 .vs/
 TestResults/
 publish/
 artifacts/
 *.user
 *.suo
-DjLoudnessMeter/Native/runtimes/win-x64/native/*
-!DjLoudnessMeter/Native/runtimes/win-x64/native/.gitkeep
 test-tones/

@@ -6,29 +6,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
-    $OutputDirectory = Join-Path $projectRoot 'publish\win-x64'
-}
+if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = Join-Path $projectRoot 'publish\win-x64' }
 
-& (Join-Path $PSScriptRoot 'Build-Native.ps1') -VcpkgRoot $VcpkgRoot
-if ($LASTEXITCODE -ne 0) {
-    throw 'Native dependency build failed.'
-}
-
-dotnet test (Join-Path $projectRoot 'DjLoudnessMeter.sln') -c Release -p:Platform=x64
-if ($LASTEXITCODE -ne 0) {
-    throw 'Tests failed.'
-}
-
-dotnet publish (Join-Path $projectRoot 'DjLoudnessMeter\DjLoudnessMeter.csproj') `
-    -c Release `
-    -r win-x64 `
-    --self-contained true `
-    -p:PublishSingleFile=true `
-    -p:IncludeNativeLibrariesForSelfExtract=true `
-    -o $OutputDirectory
-if ($LASTEXITCODE -ne 0) {
-    throw 'Publish failed.'
-}
-
-Write-Host "Published DJ Loudness Meter to $OutputDirectory"
+& (Join-Path $PSScriptRoot 'Build-Native.ps1') -VcpkgRoot $VcpkgRoot -Configuration Release
+if ($LASTEXITCODE -ne 0) { throw 'Native build failed.' }
+New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+$buildOutput = Join-Path $projectRoot 'build\Release'
+Copy-Item -LiteralPath (Join-Path $buildOutput 'DjLoudnessMeter.exe') -Destination $OutputDirectory -Force
+Copy-Item -LiteralPath (Join-Path $buildOutput 'ebur128.dll') -Destination $OutputDirectory -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $OutputDirectory -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD-PARTY-NOTICES.md') -Destination $OutputDirectory -Force
+Write-Host "Published: $OutputDirectory"
