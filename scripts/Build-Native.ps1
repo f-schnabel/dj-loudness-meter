@@ -24,6 +24,9 @@ else {
 if ($LASTEXITCODE -ne 0) { throw "vcpkg failed: $LASTEXITCODE" }
 cmake -S $projectRoot -B $buildDirectory -G 'Visual Studio 17 2022' -A x64
 if ($LASTEXITCODE -ne 0) { throw "CMake configure failed: $LASTEXITCODE" }
+$targetExecutable = Join-Path $buildDirectory "$Configuration\DjLoudnessMeter.exe"
+$runningTarget = Get-Process -Name DjLoudnessMeter -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $targetExecutable }
+if ($null -ne $runningTarget) { throw "Close the running app before building: $targetExecutable (PID $($runningTarget.Id))" }
 cmake --build $buildDirectory --config $Configuration --parallel
 if ($LASTEXITCODE -ne 0) { throw "Build failed: $LASTEXITCODE" }
 ctest --test-dir $buildDirectory -C $Configuration --output-on-failure

@@ -171,9 +171,10 @@ static void populate_monitors(App *app) {
 }
 
 static int overlay_width(App *app) {
-    int width = app->settings.show_loudness ? 255 : 0;
+    bool loudness_visible = app->settings.show_loudness && !app->meter_snapshot.hide_values;
+    int width = loudness_visible ? 255 : 0;
     if (app->settings.show_system) width += 92 + (app->system_snapshot.has_temperature ? 46 : 0);
-    if (app->settings.show_loudness && app->settings.show_system) width += 13; return width;
+    if (loudness_visible && app->settings.show_system) width += 13; return width;
 }
 
 static void position_overlay(App *app) {
@@ -237,11 +238,10 @@ static COLORREF threshold_color(double value, double amber, double red) {
     return !isfinite(value) ? primary : value >= red ? critical : value >= amber ? warning : primary;
 }
 
-static void draw_cell(HDC dc, App *app, RECT rect, const wchar_t *label, double raw, double warn, double red, bool show_value) {
+static void draw_cell(HDC dc, App *app, RECT rect, const wchar_t *label, double raw, double warn, double red) {
     wchar_t value[32]; double adjusted = display_adjust(raw, app->settings.display_zero); format_reading(adjusted, value, _countof(value));
     SetTextColor(dc, secondary); SelectObject(dc, app->small_font); RECT top = rect; top.bottom = top.top + (rect.bottom - rect.top) / 2;
     DrawTextW(dc, label, -1, &top, DT_CENTER | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX);
-    if (!show_value) return;
     SetTextColor(dc, threshold_color(adjusted, display_adjust(warn, app->settings.display_zero), display_adjust(red, app->settings.display_zero)));
     SelectObject(dc, app->value_font); RECT bottom = rect; bottom.top = top.bottom - 4; DrawTextW(dc, value, -1, &bottom, DT_CENTER | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
 }
@@ -254,17 +254,17 @@ static void draw_system_cell(HDC dc, App *app, RECT rect, const wchar_t *label, 
 
 static void paint_overlay(App *app, HDC dc, RECT bounds) {
     HBRUSH key_brush = CreateSolidBrush(color_key); FillRect(dc, &bounds, key_brush); DeleteObject(key_brush); SetBkMode(dc, TRANSPARENT);
-    int x = 0, height = bounds.bottom; if (app->settings.show_loudness) {
+    bool loudness_visible = app->settings.show_loudness && !app->meter_snapshot.hide_values;
+    int x = 0, height = bounds.bottom; if (loudness_visible) {
         int cell = 255 / 4; wchar_t peak_label[32];
         if (app->settings.refresh_ms < 1000) swprintf_s(peak_label, _countof(peak_label), L"P (%dms)", app->settings.refresh_ms);
         else swprintf_s(peak_label, _countof(peak_label), L"P (%.2gs)", app->settings.refresh_ms / 1000.0);
-        bool show_values = !app->meter_snapshot.hide_values;
-        RECT r = {x, 0, x + cell, height}; draw_cell(dc, app, r, peak_label, app->meter_snapshot.peak_db, -6, -1, show_values); x += cell;
-        r = (RECT){x, 0, x + cell, height}; draw_cell(dc, app, r, L"P (5s)", app->meter_snapshot.hold_db, -6, -1, show_values); x += cell;
-        r = (RECT){x, 0, x + cell, height}; draw_cell(dc, app, r, L"LUFS (0.4s)", app->meter_snapshot.momentary, -12, -9, show_values); x += cell;
-        r = (RECT){x, 0, x + 255 - cell * 3, height}; draw_cell(dc, app, r, L"LUFS (3s)", app->meter_snapshot.short_term, -12, -9, show_values); x += 255 - cell * 3;
+        RECT r = {x, 0, x + cell, height}; draw_cell(dc, app, r, peak_label, app->meter_snapshot.peak_db, -6, -1); x += cell;
+        r = (RECT){x, 0, x + cell, height}; draw_cell(dc, app, r, L"P (5s)", app->meter_snapshot.hold_db, -6, -1); x += cell;
+        r = (RECT){x, 0, x + cell, height}; draw_cell(dc, app, r, L"LUFS (0.4s)", app->meter_snapshot.momentary, -12, -9); x += cell;
+        r = (RECT){x, 0, x + 255 - cell * 3, height}; draw_cell(dc, app, r, L"LUFS (3s)", app->meter_snapshot.short_term, -12, -9); x += 255 - cell * 3;
     }
-    if (app->settings.show_loudness && app->settings.show_system) { HPEN pen = CreatePen(PS_SOLID, 1, RGB(60,70,78)); SelectObject(dc, pen); MoveToEx(dc, x + 6, 10, NULL); LineTo(dc, x + 6, height - 10); DeleteObject(pen); x += 13; }
+    if (loudness_visible && app->settings.show_system) { HPEN pen = CreatePen(PS_SOLID, 1, RGB(60,70,78)); SelectObject(dc, pen); MoveToEx(dc, x + 6, 10, NULL); LineTo(dc, x + 6, height - 10); DeleteObject(pen); x += 13; }
     if (app->settings.show_system) {
         if (app->system_snapshot.has_temperature) { RECT r = {x, 0, x + 46, height}; draw_system_cell(dc, app, r, L"Temp", app->system_snapshot.temperature, true, L"\x00b0"); x += 46; }
         RECT r = {x, 0, x + 46, height}; draw_system_cell(dc, app, r, L"CPU", app->system_snapshot.cpu, app->system_snapshot.has_cpu, L"%"); x += 46;
