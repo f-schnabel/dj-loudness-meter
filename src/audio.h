@@ -9,7 +9,7 @@
 typedef struct { wchar_t id[512]; wchar_t name[256]; bool is_default; } AudioDevice;
 typedef struct {
     double peak_db, hold_db, momentary, short_term;
-    bool clipping, connected, recent_audio;
+    bool clipping, connected, recent_audio, hide_values;
 } MeterSnapshot;
 
 typedef struct {

@@ -151,7 +151,7 @@ static DWORD WINAPI capture_thread(void *parameter) {
             else if (is_float) values = (const float *)data;
             else { if (!pcm_to_float(data, samples * (bits / 8), (unsigned)bits, converted, capacity)) running = false; values = converted; }
             QueryPerformanceCounter(&now); AcquireSRWLockExclusive(&e->lock);
-            if (e->reset_requested) { peak_reset(&e->peak); reset_loudness(e, &api); e->started_at = now.QuadPart; e->last_packet = e->last_signal = 0; e->loudness_reset_for_silence = true; e->reset_requested = false; }
+            if (e->reset_requested) { peak_reset(&e->peak); reset_loudness(e, &api); e->loudness_reset_for_silence = true; e->reset_requested = false; }
             float packet_peak = peak_update(&e->peak, values, samples, (unsigned)channels, now.QuadPart);
             if (e->loudness) api.add(e->loudness, values, frames); e->last_packet = now.QuadPart;
             if (packet_peak > 0.000001f) { e->last_signal = now.QuadPart; e->loudness_reset_for_silence = false; }
@@ -184,10 +184,13 @@ void audio_dispose(AudioEngine *e) { audio_stop(e); }
 void audio_reset(AudioEngine *e) { AcquireSRWLockExclusive(&e->lock); e->reset_requested = true; ReleaseSRWLockExclusive(&e->lock); }
 
 MeterSnapshot audio_snapshot(AudioEngine *e) {
-    MeterSnapshot s = {-INFINITY, -INFINITY, -INFINITY, -INFINITY, false, false, false}; LARGE_INTEGER now; QueryPerformanceCounter(&now);
+    MeterSnapshot s = {-INFINITY, -INFINITY, -INFINITY, -INFINITY, false, false, false, false}; LARGE_INTEGER now; QueryPerformanceCounter(&now);
     AcquireSRWLockExclusive(&e->lock); s.connected = e->connected;
     if (e->connected && e->loudness) {
-        int64_t signal_at = e->last_signal ? e->last_signal : e->started_at; bool silent = now.QuadPart - signal_at >= e->frequency * 5;
+        int64_t signal_at = e->last_signal ? e->last_signal : e->started_at;
+        int64_t silence_ticks = now.QuadPart - signal_at;
+        bool silent = silence_ticks >= e->frequency * 5;
+        s.hide_values = silence_ticks >= e->frequency * 10;
         PeakReading p = peak_read(&e->peak, now.QuadPart);
         if (silent) { peak_reset(&e->peak); if (!e->loudness_reset_for_silence) { e->reset_requested = true; e->loudness_reset_for_silence = true; } }
         else {
