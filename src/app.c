@@ -385,7 +385,7 @@ int app_run(HINSTANCE instance, int show_command) {
     (void)show_command; INITCOMMONCONTROLSEX common = {sizeof(common), ICC_STANDARD_CLASSES | ICC_BAR_CLASSES}; InitCommonControlsEx(&common);
     App app; ZeroMemory(&app, sizeof(app)); app.instance = instance; settings_load(&app.settings); audio_init(&app.audio, app.settings.peak_hold_ms); system_metrics_init(&app.metrics); enumerate_monitors(&app);
     app.background_brush = CreateSolidBrush(RGB(17, 20, 23)); app.font = CreateFontW(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    app.small_font = CreateFontW(-9, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    app.small_font = CreateFontW(-10, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     app.value_font = CreateFontW(-16, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
     app.system_value_font = CreateFontW(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
     HICON icon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_APP));
