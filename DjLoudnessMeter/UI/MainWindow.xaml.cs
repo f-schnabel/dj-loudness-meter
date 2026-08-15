@@ -22,6 +22,8 @@ public partial class MainWindow : Window
     private const double PeakCriticalDb = -1.0;
     private const double LufsWarning = -12.0;
     private const double LufsCritical = -9.0;
+    private const int SystemMetricsIntervalMilliseconds = 500;
+    private static readonly int[] RefreshIntervals = [50, 125, 250, 500, 750, 1000, 1250, 1500, 1750, 2000];
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoMove = 0x0002;
     private const uint SwpNoActivate = 0x0010;
@@ -41,13 +43,14 @@ public partial class MainWindow : Window
     private readonly CpuTemperatureService _cpuTemperatureService = new();
     private readonly SystemResourceService _systemResourceService = new();
     private bool _refreshingDevices;
-    private bool _compactMode;
     private bool _taskbarMode;
+    private TaskbarOverlayWindow? _taskbarOverlay;
     private double _displayZeroDbfs;
-    private double _normalWidth = 440;
-    private double _normalHeight = 520;
+    private double _normalWidth = 460;
+    private double _normalHeight = 410;
     private double _normalLeft = double.NaN;
     private double _normalTop = double.NaN;
+    private long _lastSystemMetricsUpdate;
 
     public MainWindow()
     {
@@ -58,16 +61,20 @@ public partial class MainWindow : Window
         Monitors = [];
         InitializeComponent();
         DataContext = this;
-        DisplayZeroTextBox.Text = FormatReference(_displayZeroDbfs);
-        TaskbarSideComboBox.SelectedIndex = _settings.TaskbarRightAligned ? 1 : 0;
-        MasterMeter.SetDisplayOffset(LoudnessDisplayScale.GetOffset(_displayZeroDbfs));
-        UpdateThresholdTooltips();
-
+        int refreshMilliseconds = NormalizeRefreshInterval(_settings.UiRefreshMilliseconds);
         _uiTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
-            Interval = TimeSpan.FromMilliseconds(500)
+            Interval = TimeSpan.FromMilliseconds(refreshMilliseconds)
         };
         _uiTimer.Tick += OnUiTimerTick;
+        DisplayZeroTextBox.Text = FormatReference(_displayZeroDbfs);
+        TaskbarSideComboBox.SelectedIndex = _settings.TaskbarRightAligned ? 1 : 0;
+        RefreshIntervalSlider.Value = refreshMilliseconds;
+        RefreshIntervalValue.Text = $"{refreshMilliseconds} ms";
+        _settings.UiRefreshMilliseconds = refreshMilliseconds;
+        UpdateRefreshIntervalLabel(refreshMilliseconds);
+        UpdateThresholdTooltips();
+
         _captureService.CaptureStopped += OnCaptureStopped;
     }
 
@@ -78,7 +85,7 @@ public partial class MainWindow : Window
     {
         RestoreWindowSettings();
         RefreshMonitors();
-        if (!_settings.CompactMode && !_settings.TaskbarMode)
+        if (!_settings.TaskbarMode)
         {
             _normalWidth = Width;
             _normalHeight = Height;
@@ -91,7 +98,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            SetCompactMode(_settings.CompactMode, initial: true);
+            SetNormalMode(initial: true);
         }
         _uiTimer.Start();
     }
@@ -116,8 +123,7 @@ public partial class MainWindow : Window
             _normalTop = Top;
         }
 
-        AlwaysOnTopCheckBox.IsChecked = _settings.AlwaysOnTop;
-        Topmost = _settings.AlwaysOnTop;
+        Topmost = false;
     }
 
     private void RefreshMonitors()
@@ -129,7 +135,9 @@ public partial class MainWindow : Window
             Monitors.Add(monitor);
         }
 
-        MonitorPanel.Visibility = Monitors.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        Visibility monitorVisibility = Monitors.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        MonitorLabel.Visibility = monitorVisibility;
+        MonitorComboBox.Visibility = monitorVisibility;
         DisplayMonitor? selected = Monitors.FirstOrDefault(monitor =>
                 string.Equals(monitor.DeviceName, _settings.TaskbarMonitorDeviceName, StringComparison.OrdinalIgnoreCase))
             ?? Monitors.FirstOrDefault(static monitor => monitor.IsPrimary)
@@ -212,31 +220,30 @@ public partial class MainWindow : Window
             snapshot = MeterSnapshot.Disconnected;
         }
 
-        PeakValue.Text = FormatDb(Adjust(snapshot.PeakDb), " dBFS");
-        HoldValue.Text = FormatDb(Adjust(snapshot.PeakHoldDb), " dBFS");
-        MomentaryValue.Text = FormatLufs(Adjust(snapshot.MomentaryLufs));
-        ShortTermValue.Text = FormatLufs(Adjust(snapshot.ShortTermLufs));
         CompactPeakValue.Text = FormatDb(Adjust(snapshot.PeakDb), string.Empty);
         CompactHoldValue.Text = FormatDb(Adjust(snapshot.PeakHoldDb), string.Empty);
         CompactMomentaryValue.Text = FormatLufs(Adjust(snapshot.MomentaryLufs));
         CompactShortTermValue.Text = FormatLufs(Adjust(snapshot.ShortTermLufs));
-        double? cpuTemperature = _cpuTemperatureService.ReadCelsius();
-        CpuTemperatureValue.Text = FormatTemperature(cpuTemperature);
-        CompactCpuTemperatureValue.Text = FormatCompactTemperature(cpuTemperature);
-        SystemResourceSnapshot systemResources = _systemResourceService.Read();
-        CpuUsageValue.Text = FormatPercentage(systemResources.CpuUsagePercent, compact: false);
-        MemoryUsageValue.Text = FormatPercentage(systemResources.MemoryUsagePercent, compact: false);
-        CompactCpuUsageValue.Text = FormatPercentage(systemResources.CpuUsagePercent, compact: true);
-        CompactMemoryUsageValue.Text = FormatPercentage(systemResources.MemoryUsagePercent, compact: true);
-        SetReadingColors(snapshot);
-        ClipIndicator.Visibility = snapshot.IsClipping ? Visibility.Visible : Visibility.Hidden;
-        MasterMeter.SetLevels(
-            snapshot.LeftPeakDb,
-            snapshot.RightPeakDb,
-            snapshot.PeakHoldDb,
-            snapshot.IsClipping,
-            snapshot.HasRecentAudio);
+        long now = Environment.TickCount64;
+        if (_lastSystemMetricsUpdate == 0 || now - _lastSystemMetricsUpdate >= SystemMetricsIntervalMilliseconds)
+        {
+            _lastSystemMetricsUpdate = now;
+            double? cpuTemperature = _cpuTemperatureService.ReadCelsius();
+            CompactCpuTemperatureValue.Text = FormatCompactTemperature(cpuTemperature);
+            bool hasTemperature = cpuTemperature is double temperature && double.IsFinite(temperature);
+            bool temperatureVisibilityChanged = (CompactTemperaturePanel.Visibility == Visibility.Visible) != hasTemperature;
+            CompactTemperaturePanel.Visibility = hasTemperature ? Visibility.Visible : Visibility.Collapsed;
+            TemperatureColumn.Width = hasTemperature ? new GridLength(46) : new GridLength(0);
+            if (temperatureVisibilityChanged && _taskbarMode)
+            {
+                PositionTaskbarWindow();
+            }
 
+            SystemResourceSnapshot systemResources = _systemResourceService.Read();
+            CompactCpuUsageValue.Text = FormatPercentage(systemResources.CpuUsagePercent, compact: true);
+            CompactMemoryUsageValue.Text = FormatPercentage(systemResources.MemoryUsagePercent, compact: true);
+        }
+        SetReadingColors(snapshot);
         if (snapshot.IsConnected && !snapshot.HasRecentAudio && StatusText.Foreground != ErrorBrush)
         {
             StatusText.Text = $"Monitoring {_captureService.DeviceName} · waiting for audio";
@@ -293,6 +300,21 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnRefreshIntervalChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_uiTimer is null)
+        {
+            return;
+        }
+
+        int refreshMilliseconds = NormalizeRefreshInterval((int)e.NewValue);
+        _settings.UiRefreshMilliseconds = refreshMilliseconds;
+        _uiTimer.Interval = TimeSpan.FromMilliseconds(refreshMilliseconds);
+        RefreshIntervalValue.Text = $"{refreshMilliseconds} ms";
+        UpdateRefreshIntervalLabel(refreshMilliseconds);
+        UpdateThresholdTooltips();
+    }
+
     private void OnResetClick(object sender, RoutedEventArgs e)
     {
         try
@@ -339,99 +361,28 @@ public partial class MainWindow : Window
         _displayZeroDbfs = Math.Round(reference, 1, MidpointRounding.AwayFromZero);
         _settings.DisplayZeroDbfs = _displayZeroDbfs;
         DisplayZeroTextBox.Text = FormatReference(_displayZeroDbfs);
-        MasterMeter.SetDisplayOffset(LoudnessDisplayScale.GetOffset(_displayZeroDbfs));
         UpdateThresholdTooltips();
     }
 
-    private void OnAlwaysOnTopChanged(object sender, RoutedEventArgs e)
-    {
-        Topmost = AlwaysOnTopCheckBox.IsChecked == true;
-    }
-
-    private void OnCompactClick(object sender, RoutedEventArgs e) => SetCompactMode(!_compactMode);
-
     private void OnTaskbarClick(object sender, RoutedEventArgs e) => SetTaskbarMode(true);
 
-    private void OnContextMenuOpening(object sender, ContextMenuEventArgs e)
+    private void SetNormalMode(bool initial = false)
     {
-        if (!_taskbarMode)
-        {
-            e.Handled = true;
-        }
-    }
-
-    private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
-
-    private void OnWindowMouseDoubleClick(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ChangedButton == MouseButton.Left && !IsInsideInteractiveControl(e.OriginalSource as DependencyObject))
-        {
-            if (_taskbarMode)
-            {
-                SetTaskbarMode(false);
-            }
-            else
-            {
-                SetCompactMode(!_compactMode);
-            }
-
-            e.Handled = true;
-        }
-    }
-
-    private void OnWindowMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (_compactMode && e.LeftButton == MouseButtonState.Pressed && e.ClickCount == 1 &&
-            !IsInsideInteractiveControl(e.OriginalSource as DependencyObject))
-        {
-            DragMove();
-        }
-    }
-
-    private void SetCompactMode(bool compact, bool initial = false)
-    {
-        bool wasCompact = _compactMode;
         bool wasTaskbar = _taskbarMode;
-        if (compact && !wasCompact && !wasTaskbar && !initial)
-        {
-            RememberNormalBounds();
-        }
-
         _taskbarMode = false;
-        _compactMode = compact;
         ShowInTaskbar = true;
-        Topmost = AlwaysOnTopCheckBox.IsChecked == true;
-        SetStripVisibility(compact);
-        CompactButton.Content = compact ? "Normal" : "Compact";
-        if (compact)
+        Topmost = false;
+        SetStripVisibility(false);
+        WindowStyle = WindowStyle.SingleBorderWindow;
+        ResizeMode = ResizeMode.CanResize;
+        MinWidth = 400;
+        MinHeight = 360;
+        MainRoot.Margin = new Thickness(16);
+        if (wasTaskbar && !initial)
         {
-            WindowStyle = WindowStyle.None;
-            ResizeMode = ResizeMode.CanResizeWithGrip;
-            MinWidth = 340;
-            MinHeight = 36;
-            MainRoot.Margin = new Thickness(4, 2, 4, 3);
-            Width = 390;
-            Height = 42;
-        }
-        else
-        {
-            WindowStyle = WindowStyle.SingleBorderWindow;
-            ResizeMode = ResizeMode.CanResize;
-            MinWidth = 340;
-            MinHeight = 330;
-            MainRoot.Margin = new Thickness(16);
-            HeaderPanel.Margin = new Thickness(0, 0, 0, 8);
-            MasterMeter.Margin = new Thickness(0, 0, 0, 10);
-            MasterLabel.FontSize = 20;
-            ClipIndicator.Margin = new Thickness(0, 0, 12, 0);
-            CompactButton.Margin = new Thickness(12, 0, 0, 0);
-            CompactButton.Padding = new Thickness(10, 5, 10, 5);
-            if ((wasCompact || wasTaskbar) && !initial)
-            {
-                Width = Math.Max(_normalWidth, MinWidth);
-                Height = Math.Max(_normalHeight, MinHeight);
-                RestoreNormalPosition();
-            }
+            Width = Math.Max(_normalWidth, MinWidth);
+            Height = Math.Max(_normalHeight, MinHeight);
+            RestoreNormalPosition();
         }
     }
 
@@ -439,31 +390,62 @@ public partial class MainWindow : Window
     {
         if (!taskbar)
         {
-            SetCompactMode(false, initial);
+            CloseTaskbarOverlay(restoreContent: true);
+            SetNormalMode(initial);
+            Show();
+            Activate();
             return;
         }
 
-        if (!_compactMode && !_taskbarMode && !initial)
+        if (!_taskbarMode && !initial)
         {
             RememberNormalBounds();
         }
 
         _taskbarMode = true;
-        _compactMode = false;
         SetStripVisibility(true);
-        CompactButton.Content = "Compact";
-        WindowStyle = WindowStyle.None;
-        ResizeMode = ResizeMode.NoResize;
-        MinWidth = 0;
-        MinHeight = 0;
-        MainRoot.Margin = new Thickness(4, 1, 4, 1);
         ShowInTaskbar = false;
-        Topmost = true;
-        WindowStartupLocation = WindowStartupLocation.Manual;
-
+        CreateTaskbarOverlay();
         PositionTaskbarWindow();
+        _taskbarOverlay?.Show();
+        Hide();
         Dispatcher.BeginInvoke((Action)EnsureTaskbarZOrder, DispatcherPriority.Loaded);
     }
+
+    private void CreateTaskbarOverlay()
+    {
+        if (_taskbarOverlay is not null)
+        {
+            return;
+        }
+
+        MainRoot.Children.Remove(CompactMeasurements);
+        _taskbarOverlay = new TaskbarOverlayWindow(CompactMeasurements);
+        _taskbarOverlay.RestoreRequested += OnTaskbarRestoreRequested;
+        _taskbarOverlay.CloseRequested += OnTaskbarCloseRequested;
+    }
+
+    private void CloseTaskbarOverlay(bool restoreContent)
+    {
+        if (_taskbarOverlay is null)
+        {
+            return;
+        }
+
+        _taskbarOverlay.RestoreRequested -= OnTaskbarRestoreRequested;
+        _taskbarOverlay.CloseRequested -= OnTaskbarCloseRequested;
+        FrameworkElement content = _taskbarOverlay.DetachContent();
+        _taskbarOverlay.CloseFromOwner();
+        _taskbarOverlay = null;
+        if (restoreContent)
+        {
+            MainRoot.Children.Add(content);
+        }
+    }
+
+    private void OnTaskbarRestoreRequested(object? sender, EventArgs e) => SetTaskbarMode(false);
+
+    private void OnTaskbarCloseRequested(object? sender, EventArgs e) => Close();
 
     private void RememberNormalBounds()
     {
@@ -512,6 +494,8 @@ public partial class MainWindow : Window
             return;
         }
 
+        Window target = (Window?)_taskbarOverlay ?? this;
+
         Rect bounds = ToWpfRect(monitor.Bounds);
         Rect workArea = ToWpfRect(monitor.WorkArea);
         double bottomTaskbarHeight = bounds.Bottom - workArea.Bottom;
@@ -519,22 +503,23 @@ public partial class MainWindow : Window
         double taskbarHeight;
         if (bottomTaskbarHeight > 0)
         {
-            Top = workArea.Bottom;
+            target.Top = workArea.Bottom;
             taskbarHeight = bottomTaskbarHeight;
         }
         else if (topTaskbarHeight > 0)
         {
-            Top = bounds.Top;
+            target.Top = bounds.Top;
             taskbarHeight = topTaskbarHeight;
         }
         else
         {
             taskbarHeight = 42;
-            Top = bounds.Bottom - taskbarHeight;
+            target.Top = bounds.Bottom - taskbarHeight;
         }
 
-        Width = Math.Min(430, bounds.Width);
-        Height = Math.Max(32, taskbarHeight);
+        double overlayWidth = CompactTemperaturePanel.Visibility == Visibility.Visible ? 430 : 384;
+        target.Width = Math.Min(overlayWidth, bounds.Width);
+        target.Height = Math.Max(32, taskbarHeight);
         if (_settings.TaskbarRightAligned)
         {
             double? taskbarSafeRight = DisplayMonitor.GetTaskbarSafeRight(monitor.DeviceName);
@@ -542,11 +527,11 @@ public partial class MainWindow : Window
             double safeRight = taskbarSafeRight is double physicalRight
                 ? ToWpfX(physicalRight) - 4
                 : bounds.Right - Math.Min(fallbackReserve, bounds.Width / 4);
-            Left = Math.Max(bounds.Left, safeRight - Width);
+            target.Left = Math.Max(bounds.Left, safeRight - target.Width);
         }
         else
         {
-            Left = bounds.Left;
+            target.Left = bounds.Left;
         }
     }
 
@@ -577,7 +562,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        IntPtr handle = new WindowInteropHelper(this).Handle;
+        Window target = (Window?)_taskbarOverlay ?? this;
+        IntPtr handle = new WindowInteropHelper(target).Handle;
         if (handle != IntPtr.Zero)
         {
             SetWindowPos(
@@ -593,11 +579,8 @@ public partial class MainWindow : Window
     private void SetStripVisibility(bool strip)
     {
         HeaderPanel.Visibility = strip ? Visibility.Collapsed : Visibility.Visible;
-        DevicePanel.Visibility = strip ? Visibility.Collapsed : Visibility.Visible;
-        FooterPanel.Visibility = strip ? Visibility.Collapsed : Visibility.Visible;
+        SettingsPanel.Visibility = strip ? Visibility.Collapsed : Visibility.Visible;
         StatusPanel.Visibility = strip ? Visibility.Collapsed : Visibility.Visible;
-        MasterMeter.Visibility = strip ? Visibility.Collapsed : Visibility.Visible;
-        NormalMeasurements.Visibility = strip ? Visibility.Collapsed : Visibility.Visible;
         CompactMeasurements.Visibility = strip ? Visibility.Visible : Visibility.Collapsed;
     }
     private void SetReadingColors(MeterSnapshot snapshot)
@@ -607,13 +590,9 @@ public partial class MainWindow : Window
         Brush momentaryBrush = GetThresholdBrush(Adjust(snapshot.MomentaryLufs), Adjust(LufsWarning), Adjust(LufsCritical));
         Brush shortTermBrush = GetThresholdBrush(Adjust(snapshot.ShortTermLufs), Adjust(LufsWarning), Adjust(LufsCritical));
 
-        PeakValue.Foreground = peakBrush;
         CompactPeakValue.Foreground = peakBrush;
-        HoldValue.Foreground = holdBrush;
         CompactHoldValue.Foreground = holdBrush;
-        MomentaryValue.Foreground = momentaryBrush;
         CompactMomentaryValue.Foreground = momentaryBrush;
-        ShortTermValue.Foreground = shortTermBrush;
         CompactShortTermValue.Foreground = shortTermBrush;
     }
 
@@ -622,11 +601,7 @@ public partial class MainWindow : Window
         string peakTooltip = $"Adjusted peak: amber at {FormatThreshold(Adjust(PeakWarningDb))} dB; red at {FormatThreshold(Adjust(PeakCriticalDb))} dB";
         string shortTermTooltip = $"Adjusted short-term loudness: amber at {FormatThreshold(Adjust(LufsWarning))}; red at {FormatThreshold(Adjust(LufsCritical))}";
         string momentaryTooltip = $"Adjusted momentary loudness: amber at {FormatThreshold(Adjust(LufsWarning))}; red at {FormatThreshold(Adjust(LufsCritical))}";
-        PeakValue.ToolTip = "500 ms maximum. " + peakTooltip;
-        HoldValue.ToolTip = peakTooltip;
-        ShortTermValue.ToolTip = shortTermTooltip;
-        MomentaryValue.ToolTip = momentaryTooltip;
-        CompactPeakPanel.ToolTip = "500 ms maximum. " + peakTooltip;
+        CompactPeakPanel.ToolTip = $"{_settings.UiRefreshMilliseconds} ms maximum. " + peakTooltip;
         CompactHoldPanel.ToolTip = peakTooltip;
         CompactShortTermPanel.ToolTip = shortTermTooltip;
         CompactMomentaryPanel.ToolTip = momentaryTooltip;
@@ -642,22 +617,6 @@ public partial class MainWindow : Window
         return value >= critical ? CriticalValueBrush : value >= warning ? WarningValueBrush : NormalValueBrush;
     }
 
-    private static bool IsInsideInteractiveControl(DependencyObject? source)
-    {
-        DependencyObject? current = source;
-        while (current is not null)
-        {
-            if (current is Button or ComboBox or CheckBox or TextBox)
-            {
-                return true;
-            }
-
-            current = current is Visual ? VisualTreeHelper.GetParent(current) : LogicalTreeHelper.GetParent(current);
-        }
-
-        return false;
-    }
-
     private void ShowStatus(string message, bool isError)
     {
         StatusText.Text = message;
@@ -666,7 +625,7 @@ public partial class MainWindow : Window
         {
             StatusPanel.Visibility = Visibility.Visible;
         }
-        else if (_compactMode || _taskbarMode)
+        else if (_taskbarMode)
         {
             StatusPanel.Visibility = Visibility.Collapsed;
         }
@@ -674,6 +633,7 @@ public partial class MainWindow : Window
 
     private void OnClosing(object? sender, CancelEventArgs e)
     {
+        CloseTaskbarOverlay(restoreContent: false);
         _uiTimer.Stop();
         _captureService.CaptureStopped -= OnCaptureStopped;
         _captureService.Dispose();
@@ -687,11 +647,12 @@ public partial class MainWindow : Window
             _settings.WindowHeight = ActualHeight;
         }
 
-        _settings.AlwaysOnTop = AlwaysOnTopCheckBox.IsChecked == true;
-        _settings.CompactMode = _compactMode;
+        _settings.AlwaysOnTop = false;
+        _settings.CompactMode = false;
         _settings.TaskbarMode = _taskbarMode;
         _settings.TaskbarMonitorDeviceName = (MonitorComboBox.SelectedItem as DisplayMonitor)?.DeviceName;
         _settings.TaskbarRightAligned = TaskbarSideComboBox.SelectedIndex == 1;
+        _settings.UiRefreshMilliseconds = (int)_uiTimer.Interval.TotalMilliseconds;
         _settings.DisplayZeroDbfs = _displayZeroDbfs;
         _settingsService.Save(_settings);
     }
@@ -714,11 +675,6 @@ public partial class MainWindow : Window
     private static string FormatThreshold(double value) =>
         value.ToString("+0.#;-0.#;0", CultureInfo.InvariantCulture);
 
-    private static string FormatTemperature(double? value) =>
-        value is double temperature && double.IsFinite(temperature)
-            ? temperature.ToString("0", CultureInfo.InvariantCulture) + " °C"
-            : "N/A";
-
     private static string FormatCompactTemperature(double? value) =>
         value is double temperature && double.IsFinite(temperature)
             ? temperature.ToString("0", CultureInfo.InvariantCulture) + "°"
@@ -728,6 +684,19 @@ public partial class MainWindow : Window
         value is double percentage && double.IsFinite(percentage)
             ? percentage.ToString("0", CultureInfo.InvariantCulture) + (compact ? "%" : " %")
             : "N/A";
+
+    private static int NormalizeRefreshInterval(int value)
+    {
+        return RefreshIntervals.MinBy(interval => Math.Abs(interval - value));
+    }
+
+    private void UpdateRefreshIntervalLabel(int milliseconds)
+    {
+        string interval = milliseconds < 1000
+            ? $"{milliseconds}ms"
+            : $"{milliseconds / 1000.0:0.##}s";
+        CompactPeakLabel.Text = $"P ({interval})";
+    }
     private static string ToUserMessage(Exception exception) => exception switch
     {
         DllNotFoundException => "libebur128.dll is missing. Rebuild the native dependency or use a packaged x64 release.",

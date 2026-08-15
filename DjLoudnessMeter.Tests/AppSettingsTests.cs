@@ -21,4 +21,10 @@ public sealed class AppSettingsTests
     {
         Assert.False(new AppSettings().TaskbarRightAligned);
     }
+
+    [Fact]
+    public void UiRefreshDefaultsToFiveHundredMilliseconds()
+    {
+        Assert.Equal(500, new AppSettings().UiRefreshMilliseconds);
+    }
 }
