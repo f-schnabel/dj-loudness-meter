@@ -3,8 +3,6 @@ name: Release build
 on:
   workflow_dispatch:
   push:
-    tags:
-      - 'v*'
 
 permissions:
   contents: write
@@ -14,20 +12,29 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v7
+      - name: Checkout pinned vcpkg
+        uses: actions/checkout@v7
+        with:
+          repository: microsoft/vcpkg
+          ref: ddf0518c31a259dcc359fd4c7bcb1ce8a27e9855
+          path: .vcpkg
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: ./.vcpkg/bootstrap-vcpkg.bat -disableMetrics
       - name: Publish
         shell: pwsh
-        run: ./scripts/Publish.ps1 -VcpkgRoot $env:VCPKG_INSTALLATION_ROOT
+        run: ./scripts/Publish.ps1 -VcpkgRoot ./.vcpkg
       - name: Create GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create $env:GITHUB_REF_NAME
-          "publish/win-x64/DjLoudnessMeter.exe#DjLoudnessMeter.exe"
-          "publish/win-x64/ebur128.dll#ebur128.dll"
-          "LICENSE#LICENSE"
-          "THIRD-PARTY-NOTICES.md#THIRD-PARTY-NOTICES.md"
-          --verify-tag
-          --generate-notes
-          --title "DJ Loudness Meter $env:GITHUB_REF_NAME"
+        run: |
+          $releaseTag = "build-$env:GITHUB_RUN_NUMBER"
+          gh release create $releaseTag `
+            "publish/win-x64/DjLoudnessMeter.exe#DjLoudnessMeter.exe" `
+            "publish/win-x64/ebur128.dll#ebur128.dll" `
+            "LICENSE#LICENSE" `
+            "THIRD-PARTY-NOTICES.md#THIRD-PARTY-NOTICES.md" `
+            --target $env:GITHUB_SHA `
+            --generate-notes `
+            --title "DJ Loudness Meter $releaseTag"
