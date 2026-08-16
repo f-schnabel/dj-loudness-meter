@@ -11,15 +11,12 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-2025
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v7
-      - uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgJsonGlob: 'vcpkg.json'
       - name: Publish
         shell: pwsh
-        run: ./scripts/Publish.ps1 -VcpkgRoot $env:VCPKG_ROOT
+        run: ./scripts/Publish.ps1 -VcpkgRoot $env:VCPKG_INSTALLATION_ROOT
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh

@@ -12,6 +12,9 @@ $buildDirectory = Join-Path $projectRoot 'build'
 $dll = Join-Path $installRoot 'x64-windows\bin\ebur128.dll'
 
 if (-not (Test-Path -LiteralPath $dll)) {
+    if ([string]::IsNullOrWhiteSpace($VcpkgRoot) -and -not [string]::IsNullOrWhiteSpace($env:VCPKG_INSTALLATION_ROOT)) {
+        $VcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+    }
     if ([string]::IsNullOrWhiteSpace($VcpkgRoot)) {
         $vcpkgCommand = Get-Command vcpkg -ErrorAction SilentlyContinue
         if ($null -eq $vcpkgCommand) { throw 'vcpkg not found. Set VCPKG_ROOT or place vcpkg on PATH.' }
