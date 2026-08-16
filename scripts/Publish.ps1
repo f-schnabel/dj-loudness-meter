@@ -11,9 +11,10 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = Join-Pa
 & (Join-Path $PSScriptRoot 'Build-Native.ps1') -VcpkgRoot $VcpkgRoot -Configuration Release
 if ($LASTEXITCODE -ne 0) { throw 'Native build failed.' }
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+$obsoleteDll = Join-Path $OutputDirectory 'ebur128.dll'
+if (Test-Path -LiteralPath $obsoleteDll) { Remove-Item -LiteralPath $obsoleteDll -Force }
 $buildOutput = Join-Path $projectRoot 'build\Release'
 Copy-Item -LiteralPath (Join-Path $buildOutput 'DjLoudnessMeter.exe') -Destination $OutputDirectory -Force
-Copy-Item -LiteralPath (Join-Path $buildOutput 'ebur128.dll') -Destination $OutputDirectory -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $OutputDirectory -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD-PARTY-NOTICES.md') -Destination $OutputDirectory -Force
 Write-Host "Published: $OutputDirectory"

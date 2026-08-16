@@ -32,7 +32,6 @@ jobs:
           $releaseTag = "build-$env:GITHUB_RUN_NUMBER"
           gh release create $releaseTag `
             "publish/win-x64/DjLoudnessMeter.exe#DjLoudnessMeter.exe" `
-            "publish/win-x64/ebur128.dll#ebur128.dll" `
             "LICENSE#LICENSE" `
             "THIRD-PARTY-NOTICES.md#THIRD-PARTY-NOTICES.md" `
             --target $env:GITHUB_SHA `

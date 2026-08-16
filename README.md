@@ -39,7 +39,7 @@ Set `VCPKG_ROOT` to a bootstrapped vcpkg checkout, then run:
 ./scripts/Build-Native.ps1
 ```
 
-The executable and `ebur128.dll` are written to `build\Release`.
+The self-contained executable is written to `build\Release`.
 
 For a release directory:
 

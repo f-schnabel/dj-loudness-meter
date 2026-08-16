@@ -9,9 +9,9 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $installRoot = Join-Path $projectRoot 'artifacts\vcpkg_installed'
 $buildDirectory = Join-Path $projectRoot 'build'
-$dll = Join-Path $installRoot 'x64-windows\bin\ebur128.dll'
+$library = Join-Path $installRoot 'x64-windows-static\lib\ebur128.lib'
 
-if (-not (Test-Path -LiteralPath $dll)) {
+if (-not (Test-Path -LiteralPath $library)) {
     if ([string]::IsNullOrWhiteSpace($VcpkgRoot) -and -not [string]::IsNullOrWhiteSpace($env:VCPKG_INSTALLATION_ROOT)) {
         $VcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
     }
@@ -24,7 +24,7 @@ if (-not (Test-Path -LiteralPath $dll)) {
         $vcpkgExecutable = Join-Path $VcpkgRoot 'vcpkg.exe'
         if (-not (Test-Path -LiteralPath $vcpkgExecutable)) { throw "vcpkg.exe not found: $vcpkgExecutable" }
     }
-    & $vcpkgExecutable install --triplet x64-windows --x-manifest-root $projectRoot --x-install-root $installRoot
+    & $vcpkgExecutable install --triplet x64-windows-static --x-manifest-root $projectRoot --x-install-root $installRoot
     if ($LASTEXITCODE -ne 0) { throw "vcpkg failed: $LASTEXITCODE" }
 }
 cmake -S $projectRoot -B $buildDirectory -G 'Visual Studio 17 2022' -A x64
@@ -38,6 +38,7 @@ ctest --test-dir $buildDirectory -C $Configuration --output-on-failure
 if ($LASTEXITCODE -ne 0) { throw "Tests failed: $LASTEXITCODE" }
 
 $output = Join-Path $buildDirectory $Configuration
-if (-not (Test-Path -LiteralPath $dll)) { throw "libebur128 not found: $dll" }
-Copy-Item -LiteralPath $dll -Destination (Join-Path $output 'ebur128.dll') -Force
+if (-not (Test-Path -LiteralPath $library)) { throw "Static libebur128 not found: $library" }
+$obsoleteDll = Join-Path $output 'ebur128.dll'
+if (Test-Path -LiteralPath $obsoleteDll) { Remove-Item -LiteralPath $obsoleteDll -Force }
 Write-Host "Built native application: $output"
