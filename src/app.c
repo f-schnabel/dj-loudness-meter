@@ -240,17 +240,18 @@ static COLORREF threshold_color(double value, double amber, double red) {
 
 static void draw_cell(HDC dc, App *app, RECT rect, const wchar_t *label, double raw, double warn, double red) {
     wchar_t value[32]; double adjusted = display_adjust(raw, app->settings.display_zero); format_reading(adjusted, value, _countof(value));
-    rect.right -= 5;
-    SetTextColor(dc, secondary); SelectObject(dc, app->small_font); RECT top = rect; top.bottom = top.top + (rect.bottom - rect.top) / 2;
+    rect.right -= 5; int midpoint = rect.top + (rect.bottom - rect.top) / 2;
+    SetTextColor(dc, secondary); SelectObject(dc, app->small_font); RECT top = rect; top.bottom = midpoint - 4;
     DrawTextW(dc, label, -1, &top, DT_RIGHT | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX);
     SetTextColor(dc, threshold_color(adjusted, display_adjust(warn, app->settings.display_zero), display_adjust(red, app->settings.display_zero)));
-    SelectObject(dc, app->value_font); RECT bottom = rect; bottom.top = top.bottom - 4; DrawTextW(dc, value, -1, &bottom, DT_RIGHT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
+    SelectObject(dc, app->value_font); RECT bottom = rect; bottom.top = midpoint - 4; DrawTextW(dc, value, -1, &bottom, DT_RIGHT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
 }
 
 static void draw_system_cell(HDC dc, App *app, RECT rect, const wchar_t *label, double value, bool valid, const wchar_t *suffix) {
     wchar_t text[32]; if (valid) swprintf_s(text, _countof(text), L"%.0f%s", value, suffix); else wcscpy_s(text, _countof(text), L"N/A");
-    SetTextColor(dc, secondary); SelectObject(dc, app->small_font); RECT top = rect; top.bottom = top.top + (rect.bottom - rect.top) / 2; DrawTextW(dc, label, -1, &top, DT_CENTER | DT_BOTTOM | DT_SINGLELINE);
-    SetTextColor(dc, primary); SelectObject(dc, app->system_value_font); RECT bottom = rect; bottom.top = top.bottom - 4; DrawTextW(dc, text, -1, &bottom, DT_CENTER | DT_TOP | DT_SINGLELINE);
+    int midpoint = rect.top + (rect.bottom - rect.top) / 2;
+    SetTextColor(dc, secondary); SelectObject(dc, app->small_font); RECT top = rect; top.bottom = midpoint - 4; DrawTextW(dc, label, -1, &top, DT_CENTER | DT_BOTTOM | DT_SINGLELINE);
+    SetTextColor(dc, primary); SelectObject(dc, app->system_value_font); RECT bottom = rect; bottom.top = midpoint - 4; DrawTextW(dc, text, -1, &bottom, DT_CENTER | DT_TOP | DT_SINGLELINE);
 }
 
 static void paint_overlay(App *app, HDC dc, RECT bounds) {
@@ -258,12 +259,12 @@ static void paint_overlay(App *app, HDC dc, RECT bounds) {
     bool loudness_visible = app->settings.show_loudness && !app->meter_snapshot.hide_values;
     int x = 0, height = bounds.bottom; if (loudness_visible) {
         int cell = 255 / 4; wchar_t peak_label[32];
-        if (app->settings.refresh_ms < 1000) swprintf_s(peak_label, _countof(peak_label), L"P (%dms)", app->settings.refresh_ms);
-        else swprintf_s(peak_label, _countof(peak_label), L"P (%.2gs)", app->settings.refresh_ms / 1000.0);
+        if (app->settings.refresh_ms < 1000) swprintf_s(peak_label, _countof(peak_label), L"P \x2009(%dms)", app->settings.refresh_ms);
+        else swprintf_s(peak_label, _countof(peak_label), L"P \x2009(%.2gs)", app->settings.refresh_ms / 1000.0);
         RECT r = {x, 0, x + cell, height}; draw_cell(dc, app, r, peak_label, app->meter_snapshot.peak_db, -6, -1); x += cell;
-        r = (RECT){x, 0, x + cell, height}; draw_cell(dc, app, r, L"P (5s)", app->meter_snapshot.hold_db, -6, -1); x += cell;
-        r = (RECT){x, 0, x + cell, height}; draw_cell(dc, app, r, L"LUFS (0.4s)", app->meter_snapshot.momentary, -12, -9); x += cell;
-        r = (RECT){x, 0, x + 255 - cell * 3, height}; draw_cell(dc, app, r, L"LUFS (3s)", app->meter_snapshot.short_term, -12, -9); x += 255 - cell * 3;
+        r = (RECT){x, 0, x + cell, height}; draw_cell(dc, app, r, L"P \x2009(5s)", app->meter_snapshot.hold_db, -6, -1); x += cell;
+        r = (RECT){x, 0, x + cell, height}; draw_cell(dc, app, r, L"LUFS \x2009(0.4s)", app->meter_snapshot.momentary, -12, -9); x += cell;
+        r = (RECT){x, 0, x + 255 - cell * 3, height}; draw_cell(dc, app, r, L"LUFS \x2009(3s)", app->meter_snapshot.short_term, -12, -9); x += 255 - cell * 3;
     }
     if (loudness_visible && app->settings.show_system) { HPEN pen = CreatePen(PS_SOLID, 1, RGB(60,70,78)); SelectObject(dc, pen); MoveToEx(dc, x + 6, 10, NULL); LineTo(dc, x + 6, height - 10); DeleteObject(pen); x += 13; }
     if (app->settings.show_system) {
@@ -385,7 +386,7 @@ int app_run(HINSTANCE instance, int show_command) {
     (void)show_command; INITCOMMONCONTROLSEX common = {sizeof(common), ICC_STANDARD_CLASSES | ICC_BAR_CLASSES}; InitCommonControlsEx(&common);
     App app; ZeroMemory(&app, sizeof(app)); app.instance = instance; settings_load(&app.settings); audio_init(&app.audio, app.settings.peak_hold_ms); system_metrics_init(&app.metrics); enumerate_monitors(&app);
     app.background_brush = CreateSolidBrush(RGB(17, 20, 23)); app.font = CreateFontW(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    app.small_font = CreateFontW(-10, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    app.small_font = CreateFontW(-10, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Small");
     app.value_font = CreateFontW(-16, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
     app.system_value_font = CreateFontW(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
     HICON icon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_APP));
