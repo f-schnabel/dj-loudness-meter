@@ -11,7 +11,8 @@ static BOOL WINAPI console_handler(DWORD control) {
 }
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, int show_command) {
-    (void)previous; (void)command_line;
+    (void)previous;
+    (void)command_line;
     wil::unique_handle singleton(CreateMutexW(NULL, FALSE, L"Local\\DjLoudnessMeter.Singleton"));
     if (!singleton || GetLastError() == ERROR_ALREADY_EXISTS) return 0;
 
@@ -21,6 +22,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     auto console_cleanup = wil::scope_exit([] { SetConsoleCtrlHandler(console_handler, FALSE); });
 
     HRESULT result = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-    auto com_cleanup = wil::scope_exit([result] { if (SUCCEEDED(result)) CoUninitialize(); });
+    auto com_cleanup = wil::scope_exit([result] {
+        if (SUCCEEDED(result)) CoUninitialize();
+    });
     return app_run(instance, show_command);
 }

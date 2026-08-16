@@ -8,7 +8,11 @@
 
 #define MAX_MONITORS 16
 
-typedef struct { wchar_t device[32], label[64]; RECT bounds, work; bool primary; } DisplayInfo;
+typedef struct {
+    wchar_t device[32], label[64];
+    RECT bounds, work;
+    bool primary;
+} DisplayInfo;
 
 typedef struct {
     HINSTANCE instance;
@@ -27,8 +31,10 @@ typedef struct {
     SystemMetrics metrics;
     SystemSnapshot system_snapshot;
     MeterSnapshot meter_snapshot;
-    AudioDevice devices[AUDIO_MAX_DEVICES]; int device_count, selected_device;
-    DisplayInfo monitors[MAX_MONITORS]; int monitor_count, selected_monitor;
+    AudioDevice devices[AUDIO_MAX_DEVICES];
+    int device_count, selected_device;
+    DisplayInfo monitors[MAX_MONITORS];
+    int monitor_count, selected_monitor;
     wchar_t status_text[512], format_text[128];
     ULONGLONG last_system_tick, last_status_tick;
     bool closing, menu_open;
@@ -39,6 +45,7 @@ extern "C" {
 #endif
 
 int app_run(HINSTANCE instance, int show_command);
+void app_set_status(App *app, const wchar_t *text);
 
 #ifdef __cplusplus
 }

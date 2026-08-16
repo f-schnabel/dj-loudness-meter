@@ -11,7 +11,10 @@ typedef struct {
     int64_t hold_until, clip_until;
 } PeakMeter;
 
-typedef struct { float left, right, hold; bool clipping; } PeakReading;
+typedef struct {
+    float left, right, hold;
+    bool clipping;
+} PeakReading;
 
 #ifdef __cplusplus
 extern "C" {

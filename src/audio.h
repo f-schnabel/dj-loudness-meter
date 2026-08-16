@@ -6,7 +6,11 @@
 
 #define AUDIO_MAX_DEVICES 64
 
-typedef struct { wchar_t id[512]; wchar_t name[256]; bool is_default; } AudioDevice;
+typedef struct {
+    wchar_t id[512];
+    wchar_t name[256];
+    bool is_default;
+} AudioDevice;
 typedef struct {
     double peak_db, hold_db, momentary, short_term;
     bool clipping, connected, recent_audio, hide_values;
@@ -35,7 +39,9 @@ bool audio_start(AudioEngine *engine, const wchar_t *endpoint_id);
 void audio_stop(AudioEngine *engine);
 void audio_reset(AudioEngine *engine);
 MeterSnapshot audio_snapshot(AudioEngine *engine);
-void audio_status(AudioEngine *engine, wchar_t *device, int device_count, wchar_t *format, int format_count, wchar_t *error, int error_count);
+void audio_status(
+    AudioEngine *engine, wchar_t *device, int device_count, wchar_t *format, int format_count, wchar_t *error, int error_count
+);
 
 #ifdef __cplusplus
 }

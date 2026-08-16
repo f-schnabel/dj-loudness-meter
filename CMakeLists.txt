@@ -12,8 +12,8 @@ target_include_directories(meter PUBLIC src)
 target_compile_options(meter PRIVATE /W4 /WX)
 
 add_executable(DjLoudnessMeter WIN32
-  src/main.c src/app.c src/audio.c src/automation.cpp src/settings.c src/system_metrics.c src/resource.rc)
-set_source_files_properties(src/main.c src/audio.c PROPERTIES LANGUAGE CXX)
+  src/main.cpp src/app.c src/audio.cpp src/automation.cpp src/overlay.c src/settings.c
+  src/settings_window.c src/system_metrics.c src/taskbar.c src/resource.rc)
 set(EBUR128_RELEASE_LIBRARY "${CMAKE_SOURCE_DIR}/artifacts/vcpkg_installed/x64-windows-static/lib/ebur128.lib")
 set(EBUR128_DEBUG_LIBRARY "${CMAKE_SOURCE_DIR}/artifacts/vcpkg_installed/x64-windows-static/debug/lib/ebur128.lib")
 set(VCPKG_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/artifacts/vcpkg_installed/x64-windows-static/include")
@@ -37,3 +37,14 @@ target_link_libraries(native_tests PRIVATE meter)
 
 enable_testing()
 add_test(NAME native_tests COMMAND native_tests)
+
+find_program(POWERSHELL_EXECUTABLE NAMES pwsh powershell REQUIRED)
+add_custom_target(format
+  COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass -File "${CMAKE_SOURCE_DIR}/scripts/Format.ps1"
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+add_custom_target(format-check
+  COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass -File "${CMAKE_SOURCE_DIR}/scripts/Format.ps1" -Check
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+add_custom_target(lint
+  COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass -File "${CMAKE_SOURCE_DIR}/scripts/Lint.ps1"
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

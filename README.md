@@ -47,6 +47,18 @@ For a release directory:
 ./scripts/Publish.ps1
 ```
 
+## Code quality
+
+Visual Studio's bundled Clang tools are used; they add no runtime dependency.
+
+```powershell
+./scripts/Format.ps1        # format sources
+./scripts/Format.ps1 -Check # verify formatting
+./scripts/Lint.ps1          # run clang-tidy
+```
+
+The same commands are available as CMake targets: `format`, `format-check`, and `lint`.
+
 ## Rekordbox setup
 
 1. Keep the controller as Rekordbox's main audio device.

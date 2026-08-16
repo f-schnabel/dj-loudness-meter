@@ -11,8 +11,7 @@ extern "C" bool automation_widget_right(HWND taskbar, int *right) {
     wil::com_ptr_nothrow<IUIAutomationElement> button;
     wil::unique_variant wanted = wil::make_variant_bstr_nothrow(L"WidgetsButton");
 
-    if (!automation || wanted.vt != VT_BSTR ||
-        FAILED(automation->ElementFromHandle(taskbar, root.put())) ||
+    if (!automation || wanted.vt != VT_BSTR || FAILED(automation->ElementFromHandle(taskbar, root.put())) ||
         FAILED(automation->CreatePropertyCondition(UIA_AutomationIdPropertyId, wanted, condition.put())) ||
         FAILED(root->FindFirst(TreeScope_Descendants, condition.get(), button.put())) || !button)
         return false;
