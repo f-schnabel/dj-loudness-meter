@@ -12,7 +12,7 @@ The transparent taskbar overlay shows sample peak, five-second peak hold, LUFS-M
 
 ## Runtime design
 
-- Pure C17 and Win32; no .NET, WPF, raylib, or GUI framework
+- Mostly C17 with focused C++23/WIL resource boundaries; no managed runtime or GUI framework
 - Event-driven WASAPI shared-mode loopback capture
 - Native `libebur128` short-term and momentary loudness measurement
 - One UI thread and one MMCSS audio thread
@@ -29,7 +29,7 @@ The settings window provides playback-device and monitor selection, left/right p
 - Windows 10 2004 or newer, or Windows 11, x64
 - Visual Studio 2022 with Desktop development with C++
 - CMake 3.24+
-- vcpkg for `libebur128`
+- vcpkg for `libebur128` and WIL
 
 ## Build
 

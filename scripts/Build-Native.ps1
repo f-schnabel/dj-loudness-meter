@@ -10,8 +10,9 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $installRoot = Join-Path $projectRoot 'artifacts\vcpkg_installed'
 $buildDirectory = Join-Path $projectRoot 'build'
 $library = Join-Path $installRoot 'x64-windows-static\lib\ebur128.lib'
+$wilHeader = Join-Path $installRoot 'x64-windows-static\include\wil\resource.h'
 
-if (-not (Test-Path -LiteralPath $library)) {
+if (-not (Test-Path -LiteralPath $library) -or -not (Test-Path -LiteralPath $wilHeader)) {
     if ([string]::IsNullOrWhiteSpace($VcpkgRoot) -and -not [string]::IsNullOrWhiteSpace($env:VCPKG_INSTALLATION_ROOT)) {
         $VcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
     }

@@ -14,8 +14,8 @@ typedef struct {
 } AppSettings;
 
 void settings_defaults(AppSettings *settings);
+void settings_normalize(AppSettings *settings);
 void settings_load(AppSettings *settings);
 void settings_save(const AppSettings *settings);
 
 #endif
-

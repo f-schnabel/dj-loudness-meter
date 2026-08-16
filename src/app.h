@@ -16,7 +16,8 @@ typedef struct {
     HWND device_combo, monitor_combo, side_combo, zero_edit, rate_slider, rate_label;
     HWND loudness_check, system_check, status_label, format_label, monitor_label;
     HFONT font, small_font, value_font, system_value_font;
-    HBRUSH background_brush;
+    HBRUSH background_brush, overlay_brush;
+    HPEN separator_pen;
     HDC overlay_buffer_dc;
     HBITMAP overlay_buffer_bitmap;
     HGDIOBJ overlay_buffer_original;
@@ -28,10 +29,19 @@ typedef struct {
     MeterSnapshot meter_snapshot;
     AudioDevice devices[AUDIO_MAX_DEVICES]; int device_count, selected_device;
     DisplayInfo monitors[MAX_MONITORS]; int monitor_count, selected_monitor;
-    ULONGLONG last_system_tick;
+    wchar_t status_text[512], format_text[128];
+    ULONGLONG last_system_tick, last_status_tick;
     bool closing, menu_open;
 } App;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 int app_run(HINSTANCE instance, int show_command);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

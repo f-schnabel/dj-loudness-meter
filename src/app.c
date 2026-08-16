@@ -1,10 +1,9 @@
 #include "app.h"
+#include "automation.h"
 #include "resource.h"
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
-#include <objbase.h>
-#include <UIAutomationClient.h>
 #include <windowsx.h>
 #include <math.h>
 #include <stdio.h>
@@ -26,13 +25,12 @@
 static const int refresh_intervals[] = {10, 50, 125, 250, 500, 750, 1000, 1250, 1500, 1750, 2000};
 static const COLORREF color_key = RGB(1, 2, 3), primary = RGB(243, 245, 246), secondary = RGB(143, 154, 163);
 static const COLORREF warning = RGB(246, 195, 68), critical = RGB(255, 90, 95), connected = RGB(88, 214, 141), error_color = RGB(255, 123, 127);
-static const GUID djlm_clsid_uiautomation = {0xff48dba4,0x60ef,0x4201,{0xaa,0x87,0x54,0x10,0x3e,0xef,0x59,0x4e}};
-static const GUID djlm_iid_uiautomation = {0x30cbe57d,0xd9d0,0x452a,{0xab,0x13,0x7a,0xc5,0xac,0x48,0x25,0xee}};
 
 static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
 static LRESULT CALLBACK hit_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
 static LRESULT CALLBACK overlay_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
 static void save_and_close(App *app);
+static void select_device(App *app, int index);
 
 static int nearest_refresh(int value) {
     int best = 0, distance = abs(value - refresh_intervals[0]);
@@ -71,9 +69,23 @@ static BOOL CALLBACK taskbar_callback(HWND window, LPARAM data) {
     EnumChildWindows(window, tray_child_callback, data); return search->found ? FALSE : TRUE;
 }
 
-static bool taskbar_safe_right(const DisplayInfo *monitor, int *right) {
+static bool query_taskbar_safe_right(const DisplayInfo *monitor, int *right) {
     TraySearch search = {monitor->device, 0, false}; EnumWindows(taskbar_callback, (LPARAM)&search);
     if (search.found) *right = search.left - 4; return search.found;
+}
+
+static bool taskbar_safe_right(const DisplayInfo *monitor, int *right) {
+    static ULONGLONG last_check; static wchar_t cached_monitor[32]; static int cached_right; static bool cached_found;
+    ULONGLONG now = GetTickCount64();
+    if (_wcsicmp(cached_monitor, monitor->device) == 0 && now - last_check < 5000) {
+        if (cached_found) *right = cached_right;
+        return cached_found;
+    }
+    last_check = now;
+    wcscpy_s(cached_monitor, _countof(cached_monitor), monitor->device);
+    cached_found = query_taskbar_safe_right(monitor, &cached_right);
+    if (cached_found) *right = cached_right;
+    return cached_found;
 }
 
 typedef struct { const wchar_t *monitor_device; HWND window; } TaskbarSearch;
@@ -100,16 +112,7 @@ static bool widgets_enabled(void) {
 
 static bool query_widget_right(const DisplayInfo *monitor, int *right) {
     if (!widgets_enabled()) return false; HWND taskbar = find_taskbar(monitor); if (!taskbar) return false;
-    IUIAutomation *automation = NULL; IUIAutomationElement *root = NULL, *button = NULL; IUIAutomationCondition *condition = NULL;
-    VARIANT wanted; VariantInit(&wanted); wanted.vt = VT_BSTR; wanted.bstrVal = SysAllocString(L"WidgetsButton"); bool found = false;
-    if (wanted.bstrVal && SUCCEEDED(CoCreateInstance(&djlm_clsid_uiautomation, NULL, CLSCTX_INPROC_SERVER, &djlm_iid_uiautomation, (void **)&automation)) &&
-        SUCCEEDED(IUIAutomation_ElementFromHandle(automation, taskbar, &root)) &&
-        SUCCEEDED(IUIAutomation_CreatePropertyCondition(automation, UIA_AutomationIdPropertyId, wanted, &condition)) &&
-        SUCCEEDED(IUIAutomationElement_FindFirst(root, TreeScope_Descendants, condition, &button)) && button) {
-        RECT bounds; if (SUCCEEDED(IUIAutomationElement_get_CurrentBoundingRectangle(button, &bounds)) && bounds.right > bounds.left) { *right = bounds.right + 2; found = true; }
-    }
-    if (button) IUIAutomationElement_Release(button); if (condition) IUIAutomationCondition_Release(condition);
-    if (root) IUIAutomationElement_Release(root); if (automation) IUIAutomation_Release(automation); VariantClear(&wanted); return found;
+    return automation_widget_right(taskbar, right);
 }
 
 static bool taskbar_safe_left(const DisplayInfo *monitor, int *left) {
@@ -158,8 +161,7 @@ static void populate_devices(App *app) {
     if (app->selected_device < 0 && app->device_count) app->selected_device = 0;
     if (app->selected_device >= 0) {
         SendMessageW(app->device_combo, CB_SETCURSEL, app->selected_device, 0);
-        wcscpy_s(app->settings.endpoint_id, _countof(app->settings.endpoint_id), app->devices[app->selected_device].id);
-        audio_start(&app->audio, app->settings.endpoint_id); SetWindowTextW(app->status_label, L"Starting WASAPI loopback capture...");
+        select_device(app, app->selected_device);
     } else SetWindowTextW(app->status_label, L"No active Windows playback devices are available.");
 }
 
@@ -255,7 +257,8 @@ static void draw_system_cell(HDC dc, App *app, RECT rect, const wchar_t *label, 
 }
 
 static void paint_overlay(App *app, HDC dc, RECT bounds) {
-    HBRUSH key_brush = CreateSolidBrush(color_key); FillRect(dc, &bounds, key_brush); DeleteObject(key_brush); SetBkMode(dc, TRANSPARENT);
+    FillRect(dc, &bounds, app->overlay_brush);
+    SetBkMode(dc, TRANSPARENT);
     bool loudness_visible = app->settings.show_loudness && !app->meter_snapshot.hide_values;
     int x = 0, height = bounds.bottom; if (loudness_visible) {
         int cell = 255 / 4; wchar_t peak_label[32];
@@ -266,7 +269,15 @@ static void paint_overlay(App *app, HDC dc, RECT bounds) {
         r = (RECT){x, 0, x + cell, height}; draw_cell(dc, app, r, L"LUFS \x2009(0.4s)", app->meter_snapshot.momentary, -12, -9); x += cell;
         r = (RECT){x, 0, x + 255 - cell * 3, height}; draw_cell(dc, app, r, L"LUFS \x2009(3s)", app->meter_snapshot.short_term, -12, -9); x += 255 - cell * 3;
     }
-    if (loudness_visible && app->settings.show_system) { HPEN pen = CreatePen(PS_SOLID, 1, RGB(60,70,78)); SelectObject(dc, pen); MoveToEx(dc, x + 6, 10, NULL); LineTo(dc, x + 6, height - 10); DeleteObject(pen); x += 13; }
+    if (loudness_visible && app->settings.show_system) {
+        if (app->separator_pen) {
+            HGDIOBJ previous = SelectObject(dc, app->separator_pen);
+            MoveToEx(dc, x + 6, 10, NULL);
+            LineTo(dc, x + 6, height - 10);
+            SelectObject(dc, previous);
+        }
+        x += 13;
+    }
     if (app->settings.show_system) {
         if (app->system_snapshot.has_temperature) { RECT r = {x, 0, x + 46, height}; draw_system_cell(dc, app, r, L"Temp", app->system_snapshot.temperature, true, L"\x00b0"); x += 46; }
         RECT r = {x, 0, x + 46, height}; draw_system_cell(dc, app, r, L"CPU", app->system_snapshot.cpu, app->system_snapshot.has_cpu, L"%"); x += 46;
@@ -288,21 +299,86 @@ static bool ensure_overlay_buffer(App *app, HDC target, int width, int height) {
     app->overlay_buffer_bitmap = bitmap; app->overlay_buffer_width = width; app->overlay_buffer_height = height; return true;
 }
 
-static void tick(App *app) {
-    app->meter_snapshot = audio_snapshot(&app->audio); ULONGLONG now = GetTickCount64();
-    if (!app->last_system_tick || now - app->last_system_tick >= 500) { app->last_system_tick = now; if (app->settings.show_system) app->system_snapshot = system_metrics_read(&app->metrics); if (!app->menu_open) position_overlay(app); }
+static void set_text_if_changed(HWND window, wchar_t *current, size_t count, const wchar_t *next) {
+    if (wcscmp(current, next) == 0) return;
+    wcscpy_s(current, count, next);
+    SetWindowTextW(window, next);
+}
+
+static void update_status(App *app) {
     wchar_t device[256], format[128], failure[256], status[512]; audio_status(&app->audio, device, _countof(device), format, _countof(format), failure, _countof(failure));
-    SetWindowTextW(app->format_label, format);
-    if (failure[0]) SetWindowTextW(app->status_label, failure);
-    else if (app->meter_snapshot.connected) { swprintf_s(status, _countof(status), L"Monitoring %s%s", device, app->meter_snapshot.recent_audio ? L"" : L" - waiting for audio"); SetWindowTextW(app->status_label, status); }
+    set_text_if_changed(app->format_label, app->format_text, _countof(app->format_text), format);
+    if (failure[0]) set_text_if_changed(app->status_label, app->status_text, _countof(app->status_text), failure);
+    else if (app->meter_snapshot.connected) {
+        swprintf_s(status, _countof(status), L"Monitoring %s%s", device, app->meter_snapshot.recent_audio ? L"" : L" - waiting for audio");
+        set_text_if_changed(app->status_label, app->status_text, _countof(app->status_text), status);
+    }
+}
+
+static void tick(App *app) {
+    app->meter_snapshot = audio_snapshot(&app->audio);
+    ULONGLONG now = GetTickCount64();
+    if (!app->last_system_tick || now - app->last_system_tick >= 500) {
+        app->last_system_tick = now;
+        if (app->settings.show_system) app->system_snapshot = system_metrics_read(&app->metrics);
+        if (!app->menu_open) position_overlay(app);
+    }
+    if (!app->last_status_tick || now - app->last_status_tick >= 500) {
+        app->last_status_tick = now;
+        update_status(app);
+    }
     InvalidateRect(app->overlay_window, NULL, FALSE);
-    if (!app->menu_open) SetWindowPos(app->overlay_window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 static void save_and_close(App *app) {
     app->closing = true; RECT rect; if (GetWindowRect(app->settings_window, &rect)) { app->settings.window_x = rect.left; app->settings.window_y = rect.top; app->settings.window_width = rect.right - rect.left; app->settings.window_height = rect.bottom - rect.top; }
     if (app->monitor_count) wcscpy_s(app->settings.monitor_name, _countof(app->settings.monitor_name), app->monitors[app->selected_monitor].device);
     apply_zero(app); settings_save(&app->settings); PostQuitMessage(0);
+}
+
+static bool button_checked(HWND button) {
+    return SendMessageW(button, BM_GETCHECK, 0, 0) == BST_CHECKED;
+}
+
+static void select_device(App *app, int index) {
+    if (index < 0 || index >= app->device_count) return;
+    app->selected_device = index;
+    wcscpy_s(app->settings.endpoint_id, _countof(app->settings.endpoint_id), app->devices[index].id);
+    audio_start(&app->audio, app->settings.endpoint_id);
+    SetWindowTextW(app->status_label, L"Starting WASAPI loopback capture...");
+}
+
+static void update_visible_values(App *app, int changed_id) {
+    bool show_loudness = button_checked(app->loudness_check);
+    bool show_system = button_checked(app->system_check);
+    if (!show_loudness && !show_system) {
+        HWND changed = changed_id == ID_LOUDNESS ? app->loudness_check : app->system_check;
+        SendMessageW(changed, BM_SETCHECK, BST_CHECKED, 0);
+        show_loudness = button_checked(app->loudness_check);
+        show_system = button_checked(app->system_check);
+    }
+    app->settings.show_loudness = show_loudness;
+    app->settings.show_system = show_system;
+    position_overlay(app);
+}
+
+static void handle_settings_command(App *app, int id, int notification) {
+    if (id == ID_REFRESH) populate_devices(app);
+    else if (id == ID_RESET) audio_reset(&app->audio);
+    else if (id == ID_DEVICE && notification == CBN_SELCHANGE)
+        select_device(app, (int)SendMessageW(app->device_combo, CB_GETCURSEL, 0, 0));
+    else if (id == ID_SIDE && notification == CBN_SELCHANGE) {
+        app->settings.right_aligned = SendMessageW(app->side_combo, CB_GETCURSEL, 0, 0) == 1;
+        position_overlay(app);
+    }
+    else if (id == ID_MONITOR && notification == CBN_SELCHANGE) {
+        int selected = (int)SendMessageW(app->monitor_combo, CB_GETCURSEL, 0, 0);
+        if (selected >= 0 && selected < app->monitor_count) app->selected_monitor = selected;
+        position_overlay(app);
+    }
+    else if (id == ID_ZERO && notification == EN_KILLFOCUS) apply_zero(app);
+    else if ((id == ID_LOUDNESS || id == ID_SYSTEM) && notification == BN_CLICKED)
+        update_visible_values(app, id);
 }
 
 static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -313,21 +389,7 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
     case WM_CREATE: create_settings_controls(app); return 0;
     case WM_CLOSE: if (!app->closing) { ShowWindow(window, SW_HIDE); return 0; } break;
     case WM_GETMINMAXINFO: ((MINMAXINFO *)lparam)->ptMinTrackSize.x = 460; ((MINMAXINFO *)lparam)->ptMinTrackSize.y = 430; return 0;
-    case WM_COMMAND: {
-        int id = LOWORD(wparam), notification = HIWORD(wparam);
-        if (id == ID_REFRESH) populate_devices(app);
-        else if (id == ID_RESET) audio_reset(&app->audio);
-        else if (id == ID_DEVICE && notification == CBN_SELCHANGE) { int i = (int)SendMessageW(app->device_combo, CB_GETCURSEL, 0, 0); if (i >= 0 && i < app->device_count) { app->selected_device = i; wcscpy_s(app->settings.endpoint_id, _countof(app->settings.endpoint_id), app->devices[i].id); audio_start(&app->audio, app->settings.endpoint_id); } }
-        else if (id == ID_SIDE && notification == CBN_SELCHANGE) { app->settings.right_aligned = SendMessageW(app->side_combo, CB_GETCURSEL, 0, 0) == 1; position_overlay(app); }
-        else if (id == ID_MONITOR && notification == CBN_SELCHANGE) { app->selected_monitor = (int)SendMessageW(app->monitor_combo, CB_GETCURSEL, 0, 0); position_overlay(app); }
-        else if (id == ID_ZERO && notification == EN_KILLFOCUS) apply_zero(app);
-        else if ((id == ID_LOUDNESS || id == ID_SYSTEM) && notification == BN_CLICKED) {
-            bool loud = SendMessageW(app->loudness_check, BM_GETCHECK, 0, 0) == BST_CHECKED, sys = SendMessageW(app->system_check, BM_GETCHECK, 0, 0) == BST_CHECKED;
-            if (!loud && !sys) { SendMessageW(id == ID_LOUDNESS ? app->loudness_check : app->system_check, BM_SETCHECK, BST_CHECKED, 0); }
-            app->settings.show_loudness = SendMessageW(app->loudness_check, BM_GETCHECK, 0, 0) == BST_CHECKED;
-            app->settings.show_system = SendMessageW(app->system_check, BM_GETCHECK, 0, 0) == BST_CHECKED; position_overlay(app);
-        }
-        return 0; }
+    case WM_COMMAND: handle_settings_command(app, LOWORD(wparam), HIWORD(wparam)); return 0;
     case WM_HSCROLL: if ((HWND)lparam == app->rate_slider) update_rate(app); return 0;
     case WM_CTLCOLORSTATIC: SetBkMode((HDC)wparam, TRANSPARENT); SetTextColor((HDC)wparam, primary); return (LRESULT)app->background_brush;
     case WM_CTLCOLORBTN: SetBkMode((HDC)wparam, TRANSPARENT); SetTextColor((HDC)wparam, primary); return (LRESULT)app->background_brush;
@@ -382,13 +444,49 @@ static LRESULT CALLBACK overlay_proc(HWND window, UINT message, WPARAM wparam, L
     return DefWindowProcW(window, message, wparam, lparam);
 }
 
+static void dispose_app(App *app) {
+    audio_dispose(&app->audio);
+    system_metrics_dispose(&app->metrics);
+
+    if (app->overlay_window) DestroyWindow(app->overlay_window);
+    if (app->hit_window) DestroyWindow(app->hit_window);
+    if (app->settings_window) DestroyWindow(app->settings_window);
+
+    if (app->overlay_buffer_bitmap) {
+        SelectObject(app->overlay_buffer_dc, app->overlay_buffer_original);
+        DeleteObject(app->overlay_buffer_bitmap);
+    }
+    if (app->overlay_buffer_dc) DeleteDC(app->overlay_buffer_dc);
+    if (app->font) DeleteObject(app->font);
+    if (app->small_font) DeleteObject(app->small_font);
+    if (app->value_font) DeleteObject(app->value_font);
+    if (app->system_value_font) DeleteObject(app->system_value_font);
+    if (app->separator_pen) DeleteObject(app->separator_pen);
+    if (app->overlay_brush) DeleteObject(app->overlay_brush);
+    if (app->background_brush) DeleteObject(app->background_brush);
+}
+
 int app_run(HINSTANCE instance, int show_command) {
-    (void)show_command; INITCOMMONCONTROLSEX common = {sizeof(common), ICC_STANDARD_CLASSES | ICC_BAR_CLASSES}; InitCommonControlsEx(&common);
-    App app; ZeroMemory(&app, sizeof(app)); app.instance = instance; settings_load(&app.settings); audio_init(&app.audio, app.settings.peak_hold_ms); system_metrics_init(&app.metrics); enumerate_monitors(&app);
-    app.background_brush = CreateSolidBrush(RGB(17, 20, 23)); app.font = CreateFontW(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    (void)show_command;
+    INITCOMMONCONTROLSEX common = {sizeof(common), ICC_STANDARD_CLASSES | ICC_BAR_CLASSES};
+    InitCommonControlsEx(&common);
+
+    App app;
+    ZeroMemory(&app, sizeof(app));
+    app.instance = instance;
+    settings_load(&app.settings);
+    audio_init(&app.audio, app.settings.peak_hold_ms);
+    system_metrics_init(&app.metrics);
+    enumerate_monitors(&app);
+
+    app.background_brush = CreateSolidBrush(RGB(17, 20, 23));
+    app.overlay_brush = CreateSolidBrush(color_key);
+    app.separator_pen = CreatePen(PS_SOLID, 1, RGB(60, 70, 78));
+    app.font = CreateFontW(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     app.small_font = CreateFontW(-10, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Small");
     app.value_font = CreateFontW(-16, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
     app.system_value_font = CreateFontW(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
+    if (!app.background_brush || !app.overlay_brush || !app.separator_pen) { dispose_app(&app); return 1; }
     HICON icon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_APP));
     WNDCLASSEXW settings_class = {sizeof(settings_class), CS_HREDRAW | CS_VREDRAW, settings_proc, 0, 0, instance, icon, LoadCursorW(NULL, IDC_ARROW), NULL, NULL, L"DjLoudnessMeterSettings", icon};
     WNDCLASSEXW hit_class = {sizeof(hit_class), CS_DBLCLKS, hit_proc, 0, 0, instance, icon, LoadCursorW(NULL, IDC_ARROW), NULL, NULL, L"DjLoudnessMeterHitArea", icon};
@@ -403,12 +501,29 @@ int app_run(HINSTANCE instance, int show_command) {
         0, 0, 360, 42, NULL, NULL, instance, &app);
     HWND overlay = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED, overlay_class.lpszClassName, L"DJ Loudness Meter", WS_POPUP,
         0, 0, 360, 42, NULL, NULL, instance, &app);
-    if (!settings || !hit || !overlay) return 1; SetLayeredWindowAttributes(hit, 0, 1, LWA_ALPHA); SetLayeredWindowAttributes(overlay, color_key, 255, LWA_COLORKEY); position_overlay(&app); ShowWindow(hit, SW_SHOWNOACTIVATE); ShowWindow(overlay, SW_SHOWNOACTIVATE);
-    SetTimer(overlay, TIMER_UI, (UINT)app.settings.refresh_ms, NULL); tick(&app);
-    MSG message; while (GetMessageW(&message, NULL, 0, 0) > 0) { TranslateMessage(&message); DispatchMessageW(&message); }
-    audio_dispose(&app.audio); system_metrics_dispose(&app.metrics);
-    DestroyWindow(app.overlay_window); DestroyWindow(app.hit_window); DestroyWindow(app.settings_window);
-    if (app.overlay_buffer_bitmap) { SelectObject(app.overlay_buffer_dc, app.overlay_buffer_original); DeleteObject(app.overlay_buffer_bitmap); }
-    if (app.overlay_buffer_dc) DeleteDC(app.overlay_buffer_dc);
-    DeleteObject(app.font); DeleteObject(app.small_font); DeleteObject(app.value_font); DeleteObject(app.system_value_font); DeleteObject(app.background_brush); return (int)message.wParam;
+    if (!settings || !hit || !overlay) {
+        dispose_app(&app);
+        return 1;
+    }
+
+    SetLayeredWindowAttributes(hit, 0, 1, LWA_ALPHA);
+    SetLayeredWindowAttributes(overlay, color_key, 255, LWA_COLORKEY);
+    position_overlay(&app);
+    ShowWindow(hit, SW_SHOWNOACTIVATE);
+    ShowWindow(overlay, SW_SHOWNOACTIVATE);
+    if (!SetTimer(overlay, TIMER_UI, (UINT)app.settings.refresh_ms, NULL)) {
+        dispose_app(&app);
+        return 1;
+    }
+    tick(&app);
+
+    MSG message = {0};
+    BOOL message_result;
+    while ((message_result = GetMessageW(&message, NULL, 0, 0)) > 0) {
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+    int exit_code = message_result < 0 ? 1 : (int)message.wParam;
+    dispose_app(&app);
+    return exit_code;
 }

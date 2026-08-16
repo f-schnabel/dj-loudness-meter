@@ -39,19 +39,40 @@ static void read_temperature(SystemMetrics *m, SystemSnapshot *s) {
     if (isfinite(hottest)) { s->temperature = hottest - 273.15; s->has_temperature = true; }
 }
 
-SystemSnapshot system_metrics_read(SystemMetrics *m) {
-    SystemSnapshot s = {0}; FILETIME idle_time, kernel_time, user_time;
-    if (GetSystemTimes(&idle_time, &kernel_time, &user_time)) {
-        ULONGLONG idle = file_time(idle_time), kernel = file_time(kernel_time), user = file_time(user_time);
-        if (m->has_cpu_sample && idle >= m->idle && kernel >= m->kernel && user >= m->user) {
-            ULONGLONG idle_delta = idle - m->idle, total = kernel - m->kernel + user - m->user;
-            if (total && idle_delta <= total) { s.cpu = 100.0 * (double)(total - idle_delta) / total; s.has_cpu = true; }
+static void read_cpu(SystemMetrics *m, SystemSnapshot *s) {
+    FILETIME idle_time, kernel_time, user_time;
+    if (!GetSystemTimes(&idle_time, &kernel_time, &user_time)) return;
+
+    ULONGLONG idle = file_time(idle_time);
+    ULONGLONG kernel = file_time(kernel_time);
+    ULONGLONG user = file_time(user_time);
+    if (m->has_cpu_sample && idle >= m->idle && kernel >= m->kernel && user >= m->user) {
+        ULONGLONG idle_delta = idle - m->idle;
+        ULONGLONG total = kernel - m->kernel + user - m->user;
+        if (total && idle_delta <= total) {
+            s->cpu = 100.0 * (double)(total - idle_delta) / total;
+            s->has_cpu = true;
         }
-        m->idle = idle; m->kernel = kernel; m->user = user; m->has_cpu_sample = true;
     }
+    m->idle = idle;
+    m->kernel = kernel;
+    m->user = user;
+    m->has_cpu_sample = true;
+}
+
+static void read_memory(SystemSnapshot *s) {
     MEMORYSTATUSEX memory = {sizeof(memory)};
-    if (GlobalMemoryStatusEx(&memory) && memory.ullTotalPhys) { s.memory = 100.0 * (double)(memory.ullTotalPhys - memory.ullAvailPhys) / memory.ullTotalPhys; s.has_memory = true; }
-    read_temperature(m, &s); return s;
+    if (!GlobalMemoryStatusEx(&memory) || !memory.ullTotalPhys) return;
+    s->memory = 100.0 * (double)(memory.ullTotalPhys - memory.ullAvailPhys) / memory.ullTotalPhys;
+    s->has_memory = true;
+}
+
+SystemSnapshot system_metrics_read(SystemMetrics *m) {
+    SystemSnapshot snapshot = {0};
+    read_cpu(m, &snapshot);
+    read_memory(&snapshot);
+    read_temperature(m, &snapshot);
+    return snapshot;
 }
 
 void system_metrics_dispose(SystemMetrics *m) { disable_temperature(m); }

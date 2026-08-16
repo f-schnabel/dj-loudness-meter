@@ -24,6 +24,10 @@ typedef struct {
     int64_t frequency, started_at, last_packet, last_signal;
 } AudioEngine;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void audio_init(AudioEngine *engine, int hold_ms);
 void audio_dispose(AudioEngine *engine);
 int audio_enumerate(AudioDevice *devices, int capacity);
@@ -32,5 +36,9 @@ void audio_stop(AudioEngine *engine);
 void audio_reset(AudioEngine *engine);
 MeterSnapshot audio_snapshot(AudioEngine *engine);
 void audio_status(AudioEngine *engine, wchar_t *device, int device_count, wchar_t *format, int format_count, wchar_t *error, int error_count);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

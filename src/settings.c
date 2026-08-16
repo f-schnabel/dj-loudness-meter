@@ -1,6 +1,8 @@
 #include "settings.h"
 #include "meter.h"
-#include <direct.h>
+#include <errno.h>
+#include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,9 +17,22 @@ static void settings_path(wchar_t *path, size_t count) {
 
 void settings_defaults(AppSettings *s) {
     ZeroMemory(s, sizeof(*s));
-    s->window_width = 460; s->window_height = 410;
+    s->window_width = 460; s->window_height = 430;
     s->show_loudness = true; s->show_system = true;
     s->refresh_ms = 500; s->peak_hold_ms = 5000; s->display_zero = -9.0;
+}
+
+void settings_normalize(AppSettings *s) {
+    if (s->window_width < 460) s->window_width = 460;
+    if (s->window_height < 430) s->window_height = 430;
+    if (s->window_width > 16384) s->window_width = 16384;
+    if (s->window_height > 16384) s->window_height = 16384;
+    if (s->refresh_ms < 10) s->refresh_ms = 10;
+    if (s->refresh_ms > 2000) s->refresh_ms = 2000;
+    if (s->peak_hold_ms < 0) s->peak_hold_ms = 0;
+    if (s->peak_hold_ms > 60000) s->peak_hold_ms = 60000;
+    if (!s->show_loudness && !s->show_system) s->show_loudness = true;
+    s->display_zero = display_normalize_reference(s->display_zero);
 }
 
 static const char *value_start(const char *json, const char *key) {
@@ -28,16 +43,22 @@ static const char *value_start(const char *json, const char *key) {
 }
 
 static int get_int(const char *json, const char *key, int fallback) {
-    const char *p = value_start(json, key); return p ? (int)strtol(p, NULL, 10) : fallback;
+    const char *p = value_start(json, key); if (!p) return fallback;
+    char *end = NULL; errno = 0; long value = strtol(p, &end, 10);
+    return end != p && !errno && value >= INT_MIN && value <= INT_MAX ? (int)value : fallback;
 }
 
 static double get_double(const char *json, const char *key, double fallback) {
-    const char *p = value_start(json, key); return p ? strtod(p, NULL) : fallback;
+    const char *p = value_start(json, key); if (!p) return fallback;
+    char *end = NULL; errno = 0; double value = strtod(p, &end);
+    return end != p && !errno && isfinite(value) ? value : fallback;
 }
 
 static bool get_bool(const char *json, const char *key, bool fallback) {
     const char *p = value_start(json, key); if (!p) return fallback;
-    return strncmp(p, "true", 4) == 0 ? true : strncmp(p, "false", 5) == 0 ? false : fallback;
+    if (strncmp(p, "true", 4) == 0 && strchr(" \t\r\n,}", p[4])) return true;
+    if (strncmp(p, "false", 5) == 0 && strchr(" \t\r\n,}", p[5])) return false;
+    return fallback;
 }
 
 static void get_string(const char *json, const char *key, wchar_t *out, int count) {
@@ -63,23 +84,25 @@ void settings_load(AppSettings *s) {
     s->right_aligned = get_bool(json, "TaskbarRightAligned", false);
     s->show_loudness = get_bool(json, "ShowLoudnessValues", true);
     s->show_system = get_bool(json, "ShowSystemValues", true);
-    if (!s->show_loudness && !s->show_system) s->show_loudness = true;
     s->refresh_ms = get_int(json, "UiRefreshMilliseconds", 500);
     s->peak_hold_ms = get_int(json, "PeakHoldMilliseconds", 5000);
-    s->display_zero = display_normalize_reference(get_double(json, "DisplayZeroDbfs", -9.0));
+    s->display_zero = get_double(json, "DisplayZeroDbfs", -9.0);
+    settings_normalize(s);
 }
 
 static void escaped_utf8(const wchar_t *wide, char *out, size_t count) {
-    char raw[1024]; WideCharToMultiByte(CP_UTF8, 0, wide, -1, raw, sizeof(raw), NULL, NULL);
+    char raw[1024] = {0};
+    if (!WideCharToMultiByte(CP_UTF8, 0, wide, -1, raw, sizeof(raw), NULL, NULL)) { out[0] = 0; return; }
     size_t n = 0; for (size_t i = 0; raw[i] && n + 2 < count; ++i) { if (raw[i] == '\\' || raw[i] == '"') out[n++] = '\\'; out[n++] = raw[i]; } out[n] = 0;
 }
 
 void settings_save(const AppSettings *s) {
+    AppSettings normalized = *s; settings_normalize(&normalized); s = &normalized;
     wchar_t path[MAX_PATH]; settings_path(path, _countof(path));
     wchar_t temporary[MAX_PATH]; wcscpy_s(temporary, _countof(temporary), path); wcscat_s(temporary, _countof(temporary), L".tmp");
     FILE *file = NULL; if (_wfopen_s(&file, temporary, L"wb") || !file) return;
     char endpoint[1024], monitor[128]; escaped_utf8(s->endpoint_id, endpoint, sizeof(endpoint)); escaped_utf8(s->monitor_name, monitor, sizeof(monitor));
-    fprintf(file,
+    int written = fprintf(file,
         "{\n  \"SelectedAudioEndpointId\": \"%s\",\n  \"WindowLeft\": %d,\n  \"WindowTop\": %d,\n"
         "  \"WindowWidth\": %d,\n  \"WindowHeight\": %d,\n  \"AlwaysOnTop\": false,\n"
         "  \"TaskbarMonitorDeviceName\": \"%s\",\n  \"TaskbarRightAligned\": %s,\n"
@@ -88,5 +111,7 @@ void settings_save(const AppSettings *s) {
         endpoint, s->window_x, s->window_y, s->window_width, s->window_height, monitor,
         s->right_aligned ? "true" : "false", s->show_loudness ? "true" : "false", s->show_system ? "true" : "false",
         s->refresh_ms, s->peak_hold_ms, s->display_zero);
-    fclose(file); MoveFileExW(temporary, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+    bool saved = written >= 0 && fflush(file) == 0;
+    if (fclose(file) != 0) saved = false;
+    if (!saved || !MoveFileExW(temporary, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) DeleteFileW(temporary);
 }
