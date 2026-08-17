@@ -1,6 +1,7 @@
 #include "audio.h"
 #include <audioclient.h>
 #include <avrt.h>
+#include <cstring>
 #include <propkeydef.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <ksmedia.h>
@@ -24,6 +25,23 @@ int __cdecl ebur128_loudness_shortterm(ebur128_state *state, double *out);
 
 static const GUID djlm_pcm = {1, 0, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
 static const GUID djlm_float = {3, 0, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
+static const wchar_t voicemeeter_prefix[] = L"djlm:voicemeeter:";
+static const wchar_t *voicemeeter_paths[] = {
+    L"C:\\Program Files (x86)\\VB\\Voicemeeter\\VoicemeeterRemote64.dll", L"C:\\Program Files\\VB\\Voicemeeter\\VoicemeeterRemote64.dll"
+};
+
+struct VoicemeeterAudioInfo {
+    long sample_rate;
+    long samples;
+};
+struct VoicemeeterAudioBuffer {
+    long sample_rate, samples, inputs, outputs;
+    float *read[128];
+    float *write[128];
+};
+using VoicemeeterCallback = long(__stdcall *)(void *, long, void *, long);
+using VoicemeeterRegister = long(__stdcall *)(long, VoicemeeterCallback, void *, char *);
+using VoicemeeterControl = long(__stdcall *)();
 
 using unique_mmcss_handle = wil::unique_any<HANDLE, decltype(&AvRevertMmThreadCharacteristics), AvRevertMmThreadCharacteristics>;
 
@@ -57,33 +75,76 @@ static wchar_t *device_friendly_name(IMMDevice *device, wchar_t *buffer, size_t 
     return buffer;
 }
 
-int audio_enumerate(AudioDevice *devices, int capacity) {
-    auto enumerator = wil::CoCreateInstanceNoThrow<IMMDeviceEnumerator>(__uuidof(MMDeviceEnumerator), CLSCTX_ALL);
+static HMODULE load_voicemeeter() {
+    for (const wchar_t *path : voicemeeter_paths) {
+        if (HMODULE module = LoadLibraryExW(path, NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR)) return module;
+        if (HMODULE module = LoadLibraryW(path)) return module;
+    }
+    return NULL;
+}
+
+static bool voicemeeter_installed() {
+    for (const wchar_t *path : voicemeeter_paths)
+        if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) return true;
+    return false;
+}
+
+static int enumerate_playback(IMMDeviceEnumerator *enumerator, AudioDevice *devices, int capacity) {
     wil::com_ptr_nothrow<IMMDeviceCollection> collection;
     wil::com_ptr_nothrow<IMMDevice> default_device;
     wil::unique_cotaskmem_string default_id;
-    int result = 0;
-    if (!enumerator) return 0;
     if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, default_device.put())))
         default_device->GetId(wil::out_param(default_id));
-    if (SUCCEEDED(enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, collection.put()))) {
-        UINT count = 0;
-        collection->GetCount(&count);
-        for (UINT i = 0; i < count && result < capacity; ++i) {
-            wil::com_ptr_nothrow<IMMDevice> device;
-            wil::unique_cotaskmem_string id;
-            if (SUCCEEDED(collection->Item(i, device.put())) && SUCCEEDED(device->GetId(wil::out_param(id)))) {
-                wcsncpy_s(devices[result].id, _countof(devices[result].id), id.get(), _TRUNCATE);
-                device_friendly_name(device.get(), devices[result].name, _countof(devices[result].name));
-                devices[result].is_default = default_id && wcscmp(default_id.get(), id.get()) == 0;
-                ++result;
-            }
+    if (FAILED(enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, collection.put()))) return 0;
+    int result = 0;
+    UINT count = 0;
+    collection->GetCount(&count);
+    for (UINT i = 0; i < count && result < capacity; ++i) {
+        wil::com_ptr_nothrow<IMMDevice> device;
+        wil::unique_cotaskmem_string id;
+        if (FAILED(collection->Item(i, device.put())) || FAILED(device->GetId(wil::out_param(id)))) continue;
+        wchar_t friendly[256];
+        wcsncpy_s(devices[result].id, _countof(devices[result].id), id.get(), _TRUNCATE);
+        device_friendly_name(device.get(), friendly, _countof(friendly));
+        swprintf_s(devices[result].name, _countof(devices[result].name), L"%s [playback]", friendly);
+        devices[result].is_default = default_id && wcscmp(default_id.get(), id.get()) == 0;
+        devices[result].is_direct = false;
+        ++result;
+    }
+    return result;
+}
+
+int audio_enumerate(AudioDevice *devices, int capacity) {
+    auto enumerator = wil::CoCreateInstanceNoThrow<IMMDeviceEnumerator>(__uuidof(MMDeviceEnumerator), CLSCTX_ALL);
+    int result = 0;
+    if (!enumerator) return 0;
+    result = enumerate_playback(enumerator.get(), devices, capacity);
+    if (voicemeeter_installed()) {
+        int input_offset = 4;
+        for (int i = 0; i < result; ++i) {
+            if (wcsstr(devices[i].name, L"VAIO3")) input_offset = 10;
+            else if (input_offset < 6 && wcsstr(devices[i].name, L"Voicemeeter AUX")) input_offset = 6;
+        }
+        for (int pair = 0; pair < 4 && result < capacity; ++pair) {
+            swprintf_s(devices[result].id, _countof(devices[result].id), L"%s%d:%d", voicemeeter_prefix, input_offset, pair);
+            swprintf_s(
+                devices[result].name,
+                _countof(devices[result].name),
+                L"Voicemeeter Virtual ASIO %d-%d [direct]",
+                pair * 2 + 1,
+                pair * 2 + 2
+            );
+            devices[result].is_default = false;
+            devices[result].is_direct = true;
+            ++result;
         }
     }
     for (int i = 0; i < result; ++i)
         for (int j = i + 1; j < result; ++j) {
-            bool swap = (!devices[i].is_default && devices[j].is_default) ||
-                        (devices[i].is_default == devices[j].is_default && _wcsicmp(devices[i].name, devices[j].name) > 0);
+            bool swap = (!devices[i].is_direct && devices[j].is_direct) ||
+                        (devices[i].is_direct == devices[j].is_direct && !devices[i].is_default && devices[j].is_default) ||
+                        (devices[i].is_direct == devices[j].is_direct && devices[i].is_default == devices[j].is_default &&
+                         _wcsicmp(devices[i].name, devices[j].name) > 0);
             if (swap) {
                 AudioDevice temp = devices[i];
                 devices[i] = devices[j];
@@ -114,6 +175,88 @@ static bool reset_loudness(AudioEngine *e) {
     if (e->loudness) ebur128_destroy((ebur128_state **)&e->loudness);
     e->loudness = ebur128_init((unsigned)e->channels, (unsigned long)e->sample_rate, 3);
     return e->loudness != NULL;
+}
+
+static long __stdcall voicemeeter_callback(void *user, long command, void *data, long) {
+    AudioEngine *e = (AudioEngine *)user;
+    if (command == 1) {
+        VoicemeeterAudioInfo *info = (VoicemeeterAudioInfo *)data;
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        auto lock = wil::AcquireSRWLockExclusive(&e->lock);
+        e->channels = 2;
+        e->sample_rate = (int)info->sample_rate;
+        e->started_at = now.QuadPart;
+        e->last_packet = e->last_signal = 0;
+        e->loudness_reset_for_silence = true;
+        peak_init(&e->peak, e->frequency, e->hold_ms);
+        if (!reset_loudness(e)) return 0;
+        swprintf_s(
+            e->device_name,
+            _countof(e->device_name),
+            L"Voicemeeter Virtual ASIO %d-%d",
+            e->voicemeeter_pair * 2 + 1,
+            e->voicemeeter_pair * 2 + 2
+        );
+        swprintf_s(e->format, _countof(e->format), L"%.1f kHz - 32-bit float - 2 ch", info->sample_rate / 1000.0);
+        e->error[0] = 0;
+        e->connected = true;
+    } else if (command == 10) {
+        VoicemeeterAudioBuffer *buffer = (VoicemeeterAudioBuffer *)data;
+        if (buffer->samples <= 0 || buffer->samples > 2048) return 0;
+        long passthrough_channels = buffer->inputs < buffer->outputs ? buffer->inputs : buffer->outputs;
+        for (long channel = 0; channel < passthrough_channels; ++channel)
+            if (buffer->read[channel] && buffer->write[channel])
+                std::memcpy(buffer->write[channel], buffer->read[channel], (size_t)buffer->samples * sizeof(float));
+        int left = e->voicemeeter_offset + e->voicemeeter_pair * 2;
+        if (left + 1 >= buffer->inputs || !buffer->read[left] || !buffer->read[left + 1]) return 0;
+        for (long i = 0; i < buffer->samples; ++i) {
+            e->voicemeeter_buffer[i * 2] = buffer->read[left][i];
+            e->voicemeeter_buffer[i * 2 + 1] = buffer->read[left + 1][i];
+        }
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        auto lock = wil::AcquireSRWLockExclusive(&e->lock);
+        if (e->reset_requested) {
+            peak_reset(&e->peak);
+            e->loudness_reset_for_silence = true;
+            e->reset_requested = false;
+            reset_loudness(e);
+        }
+        float packet_peak = peak_update(&e->peak, e->voicemeeter_buffer, (size_t)buffer->samples * 2, 2, now.QuadPart);
+        if (e->loudness) ebur128_add_frames_float((ebur128_state *)e->loudness, e->voicemeeter_buffer, (size_t)buffer->samples);
+        e->last_packet = now.QuadPart;
+        if (packet_peak > 0.000001f) {
+            e->last_signal = now.QuadPart;
+            e->loudness_reset_for_silence = false;
+        }
+    }
+    return 0;
+}
+
+static DWORD voicemeeter_thread(AudioEngine *e) {
+    HMODULE module = load_voicemeeter();
+    if (!module) return capture_fail(e, L"Voicemeeter Remote API was not found.");
+    auto free_module = wil::scope_exit([module] { FreeLibrary(module); });
+    auto register_callback = reinterpret_cast<VoicemeeterRegister>(GetProcAddress(module, "VBVMR_AudioCallbackRegister"));
+    auto start = reinterpret_cast<VoicemeeterControl>(GetProcAddress(module, "VBVMR_AudioCallbackStart"));
+    auto stop = reinterpret_cast<VoicemeeterControl>(GetProcAddress(module, "VBVMR_AudioCallbackStop"));
+    auto unregister_callback = reinterpret_cast<VoicemeeterControl>(GetProcAddress(module, "VBVMR_AudioCallbackUnregister"));
+    if (!register_callback || !start || !stop || !unregister_callback)
+        return capture_fail(e, L"Voicemeeter Remote Audio API is unavailable.");
+    char client[64] = "DJ Loudness Meter";
+    long registered = register_callback(1, voicemeeter_callback, e, client);
+    if (registered != 0)
+        return capture_fail(
+            e,
+            registered == 1 ? L"Another app is using Voicemeeter's input audio callback."
+                            : L"Voicemeeter audio callback registration failed."
+        );
+    auto unregister = wil::scope_exit([unregister_callback] { unregister_callback(); });
+    if (start() != 0) return capture_fail(e, L"Voicemeeter audio callback could not start. Is Voicemeeter running?");
+    WaitForSingleObject(e->stop_event, INFINITE);
+    stop();
+    return 0;
 }
 
 struct CaptureSession {
@@ -264,6 +407,18 @@ static const wchar_t *process_packets(AudioEngine *e, CaptureSession *session) {
 
 static DWORD WINAPI capture_thread(void *parameter) {
     AudioEngine *e = (AudioEngine *)parameter;
+    if (wcsncmp(e->endpoint_id, voicemeeter_prefix, _countof(voicemeeter_prefix) - 1) == 0) {
+        const wchar_t *source = e->endpoint_id + _countof(voicemeeter_prefix) - 1;
+        if (swscanf_s(source, L"%d:%d", &e->voicemeeter_offset, &e->voicemeeter_pair) != 2) {
+            e->voicemeeter_offset = 6;
+            e->voicemeeter_pair = _wtoi(source);
+        }
+        DWORD result = voicemeeter_thread(e);
+        auto lock = wil::AcquireSRWLockExclusive(&e->lock);
+        e->connected = false;
+        if (e->loudness) ebur128_destroy((ebur128_state **)&e->loudness);
+        return result;
+    }
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     auto com_cleanup = wil::scope_exit([hr] {
         if (SUCCEEDED(hr)) CoUninitialize();

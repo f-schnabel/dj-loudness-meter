@@ -85,7 +85,7 @@ static void select_device(App *app, int index) {
     if (index < 0 || index >= app->device_count) return;
     app->selected_device = index;
     wcscpy_s(app->settings.endpoint_id, _countof(app->settings.endpoint_id), app->devices[index].id);
-    app_set_status(app, L"Starting WASAPI loopback capture...");
+    app_set_status(app, app->devices[index].is_direct ? L"Starting direct Voicemeeter capture..." : L"Starting WASAPI loopback capture...");
     if (!audio_start(&app->audio, app->settings.endpoint_id)) report_start_failure(app);
 }
 
@@ -104,7 +104,7 @@ static void populate_devices(App *app) {
     if (app->selected_device >= 0) {
         SendMessageW(app->device_combo, CB_SETCURSEL, app->selected_device, 0);
         select_device(app, app->selected_device);
-    } else app_set_status(app, L"No active Windows playback devices are available.");
+    } else app_set_status(app, L"No supported audio sources are available.");
 }
 
 static void populate_monitors(App *app) {

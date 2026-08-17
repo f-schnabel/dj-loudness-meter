@@ -4,7 +4,7 @@
   <img src="assets/DjLoudnessMeter.ico" alt="DJ Loudness Meter icon" width="96" />
 </p>
 
-A lightweight native Windows taskbar meter for the playback device receiving Rekordbox **PC MASTER OUT**. It uses WASAPI loopback and does not route, record, retransmit, or modify audio.
+A lightweight native Windows taskbar meter for audio from Rekordbox. It uses WASAPI loopback or Voicemeeter's direct audio callback and does not record, retransmit, or modify audio.
 
 ![DJ Loudness Meter taskbar overlay](docs/taskbar-overlay.png)
 
@@ -13,7 +13,7 @@ The transparent taskbar overlay shows sample peak, five-second peak hold, LUFS-M
 ## Runtime design
 
 - Mostly C17 with focused C++23/WIL resource boundaries; no managed runtime or GUI framework
-- Event-driven WASAPI shared-mode loopback capture
+- Event-driven WASAPI shared-mode loopback or Voicemeeter input-insert capture
 - Native `libebur128` short-term and momentary loudness measurement
 - One UI thread and one MMCSS audio thread
 - UI repaints only at the selected 10–2000 ms interval
@@ -22,7 +22,7 @@ The transparent taskbar overlay shows sample peak, five-second peak hold, LUFS-M
 - Float audio is metered without conversion; PCM uses one reusable buffer
 - No FFT, waveform, recording, raw audio history, or growing work queue
 
-The settings window provides playback-device and monitor selection, left/right placement, display-zero reference, update-rate slider, loudness/system checkboxes, device refresh, and meter reset. Settings remain compatible with the previous JSON file under `%APPDATA%\DjLoudnessMeter`.
+The settings window provides audio-source and monitor selection, left/right placement, display-zero reference, update-rate slider, loudness/system checkboxes, device refresh, and meter reset. Settings remain compatible with the previous JSON file under `%APPDATA%\DjLoudnessMeter`.
 
 ## Requirements
 
@@ -67,6 +67,10 @@ The same commands are available as CMake targets: `format`, `format-check`, and 
 4. Play audio.
 
 WASAPI loopback observes everything rendered to that endpoint, not Rekordbox alone.
+
+### Voicemeeter ASIO
+
+ASIO drivers are not Windows playback endpoints. When Voicemeeter is installed, the picker adds direct Voicemeeter ASIO channel pairs using its Remote Audio API. Start Voicemeeter, choose the pair used by Rekordbox (normally channels 1–2), and play audio. The callback passes every channel through unchanged.
 
 ## Meter behavior
 

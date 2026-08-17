@@ -10,6 +10,7 @@ typedef struct {
     wchar_t id[512];
     wchar_t name[256];
     bool is_default;
+    bool is_direct;
 } AudioDevice;
 typedef struct {
     double peak_db, hold_db, momentary, short_term;
@@ -26,6 +27,8 @@ typedef struct {
     void *loudness;
     int channels, sample_rate;
     int64_t frequency, started_at, last_packet, last_signal;
+    float voicemeeter_buffer[4096];
+    int voicemeeter_pair, voicemeeter_offset;
 } AudioEngine;
 
 #ifdef __cplusplus
