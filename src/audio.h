@@ -9,8 +9,7 @@
 typedef struct {
     wchar_t id[512];
     wchar_t name[256];
-    bool is_default;
-    bool is_direct;
+    bool is_default, is_direct, has_audio;
 } AudioDevice;
 typedef struct {
     double peak_db, hold_db, momentary, short_term;
@@ -38,6 +37,7 @@ extern "C" {
 void audio_init(AudioEngine *engine, int hold_ms);
 void audio_dispose(AudioEngine *engine);
 int audio_enumerate(AudioDevice *devices, int capacity);
+bool audio_probe_activity(const AudioDevice *devices, int count, bool *results, HANDLE stop_event);
 bool audio_start(AudioEngine *engine, const wchar_t *endpoint_id);
 void audio_stop(AudioEngine *engine);
 void audio_reset(AudioEngine *engine);

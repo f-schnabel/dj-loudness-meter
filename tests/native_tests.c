@@ -70,7 +70,7 @@ static void test_display(void) {
 static void test_settings_normalization(void) {
     AppSettings settings;
     settings_defaults(&settings);
-    assert(settings.window_width == 460 && settings.window_height == 430);
+    assert(settings.window_width == SETTINGS_MIN_WIDTH && settings.window_height == SETTINGS_MIN_HEIGHT);
 
     settings.window_width = -1;
     settings.window_height = 99999;
@@ -81,7 +81,7 @@ static void test_settings_normalization(void) {
     settings.display_zero = -99.0;
     settings_normalize(&settings);
 
-    assert(settings.window_width == 460 && settings.window_height == 16384);
+    assert(settings.window_width == SETTINGS_MIN_WIDTH && settings.window_height == 16384);
     assert(settings.refresh_ms == 10 && settings.peak_hold_ms == 60000);
     assert(settings.show_loudness && !settings.show_system);
     assert_near(settings.display_zero, -30.0, 0.0);

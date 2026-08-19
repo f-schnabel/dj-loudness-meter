@@ -208,6 +208,7 @@ static LRESULT CALLBACK overlay_proc(HWND window, UINT message, WPARAM wparam, L
 }
 
 static void dispose_app(App *app) {
+    settings_window_dispose(app);
     audio_dispose(&app->audio);
     system_metrics_dispose(&app->metrics);
     if (app->overlay_window) DestroyWindow(app->overlay_window);
@@ -272,8 +273,8 @@ int app_run(HINSTANCE instance, int show_command) {
 
     int x = app.settings.has_window_position ? app.settings.window_x : CW_USEDEFAULT;
     int y = app.settings.has_window_position ? app.settings.window_y : CW_USEDEFAULT;
-    int width = app.settings.window_width < 460 ? 460 : app.settings.window_width;
-    int height = app.settings.window_height < 430 ? 430 : app.settings.window_height;
+    int width = app.settings.window_width < SETTINGS_MIN_WIDTH ? SETTINGS_MIN_WIDTH : app.settings.window_width;
+    int height = app.settings.window_height < SETTINGS_MIN_HEIGHT ? SETTINGS_MIN_HEIGHT : app.settings.window_height;
     HWND settings = CreateWindowExW(
         0,
         settings_class.lpszClassName,

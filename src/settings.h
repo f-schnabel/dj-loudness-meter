@@ -4,6 +4,9 @@
 #include <stdbool.h>
 #include <windows.h>
 
+#define SETTINGS_MIN_WIDTH 620
+#define SETTINGS_MIN_HEIGHT 480
+
 typedef struct {
     wchar_t endpoint_id[512];
     wchar_t monitor_name[32];

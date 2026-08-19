@@ -1,4 +1,5 @@
 #include "settings_window.h"
+#include "autostart.h"
 #include "overlay.h"
 #include <commctrl.h>
 #include <math.h>
@@ -16,7 +17,9 @@
 #define ID_LOUDNESS 1007
 #define ID_SYSTEM 1008
 #define ID_RESET 1009
+#define ID_AUTOSTART 1012
 #define TIMER_UI 1
+#define WM_ACTIVITY_READY (WM_APP + 1)
 
 static const int refresh_intervals[] = {10, 50, 125, 250, 500, 750, 1000, 1250, 1500, 1750, 2000};
 static const COLORREF primary = RGB(243, 245, 246);
@@ -89,7 +92,71 @@ static void select_device(App *app, int index) {
     if (!audio_start(&app->audio, app->settings.endpoint_id)) report_start_failure(app);
 }
 
+static bool device_should_swap(const AudioDevice *left, const AudioDevice *right) {
+    if (left->has_audio != right->has_audio) return !left->has_audio;
+    if (left->is_direct != right->is_direct) return !left->is_direct;
+    if (left->is_default != right->is_default) return !left->is_default;
+    return _wcsicmp(left->name, right->name) > 0;
+}
+
+static void sort_devices(App *app) {
+    for (int i = 0; i < app->device_count; ++i)
+        for (int j = i + 1; j < app->device_count; ++j)
+            if (device_should_swap(&app->devices[i], &app->devices[j])) {
+                AudioDevice temporary = app->devices[i];
+                app->devices[i] = app->devices[j];
+                app->devices[j] = temporary;
+            }
+}
+
+static void rebuild_device_combo(App *app) {
+    sort_devices(app);
+    SendMessageW(app->device_combo, CB_RESETCONTENT, 0, 0);
+    app->selected_device = -1;
+    for (int i = 0; i < app->device_count; ++i) {
+        SendMessageW(app->device_combo, CB_ADDSTRING, 0, (LPARAM)app->devices[i].name);
+        if (wcscmp(app->settings.endpoint_id, app->devices[i].id) == 0) app->selected_device = i;
+    }
+    if (app->selected_device < 0 && app->device_count) app->selected_device = 0;
+    SendMessageW(app->device_combo, CB_SETCURSEL, app->selected_device, 0);
+}
+
+static void stop_activity_probe(App *app) {
+    if (app->activity_stop_event) SetEvent(app->activity_stop_event);
+    if (app->activity_thread) {
+        WaitForSingleObject(app->activity_thread, INFINITE);
+        CloseHandle(app->activity_thread);
+    }
+    if (app->activity_stop_event) CloseHandle(app->activity_stop_event);
+    app->activity_thread = app->activity_stop_event = NULL;
+}
+
+static DWORD WINAPI activity_probe_thread(void *parameter) {
+    App *app = (App *)parameter;
+    UINT generation = app->activity_generation;
+    if (audio_probe_activity(app->devices, app->device_count, app->device_activity, app->activity_stop_event))
+        PostMessageW(app->settings_window, WM_ACTIVITY_READY, generation, 0);
+    return 0;
+}
+
+static void start_activity_probe(App *app) {
+    stop_activity_probe(app);
+    if (!app->device_count) return;
+    ++app->activity_generation;
+    ZeroMemory(app->device_activity, sizeof(app->device_activity));
+    app->activity_stop_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (!app->activity_stop_event) return;
+    app->activity_thread = CreateThread(NULL, 0, activity_probe_thread, app, 0, NULL);
+    if (!app->activity_thread) {
+        CloseHandle(app->activity_stop_event);
+        app->activity_stop_event = NULL;
+        return;
+    }
+    app->last_activity_probe_tick = GetTickCount64();
+}
+
 static void populate_devices(App *app) {
+    stop_activity_probe(app);
     audio_stop(&app->audio);
     SendMessageW(app->device_combo, CB_RESETCONTENT, 0, 0);
     app->device_count = audio_enumerate(app->devices, AUDIO_MAX_DEVICES);
@@ -105,6 +172,7 @@ static void populate_devices(App *app) {
         SendMessageW(app->device_combo, CB_SETCURSEL, app->selected_device, 0);
         select_device(app, app->selected_device);
     } else app_set_status(app, L"No supported audio sources are available.");
+    start_activity_probe(app);
 }
 
 static void populate_monitors(App *app) {
@@ -119,12 +187,12 @@ static void populate_monitors(App *app) {
 static void create_controls(App *app) {
     control(app, L"STATIC", L"TASKBAR METER", SS_LEFT, 16, 13, 300, 25, 0);
     control(app, L"STATIC", L"Overlay settings", SS_LEFT, 16, 38, 300, 18, 0);
-    app->status_label = control(app, L"STATIC", L"Selecting an audio device...", SS_LEFT | SS_NOPREFIX, 16, 66, 412, 24, 0);
-    control(app, L"STATIC", L"Audio source", SS_LEFT, 16, 100, 412, 20, 0);
-    app->device_combo = control(app, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL, 28, 122, 308, 200, ID_DEVICE);
-    control(app, L"BUTTON", L"Refresh", BS_PUSHBUTTON, 344, 121, 72, 27, ID_REFRESH);
-    app->format_label = control(app, L"STATIC", L"", SS_LEFT | SS_NOPREFIX, 28, 153, 380, 18, 0);
-    control(app, L"STATIC", L"Taskbar overlay", SS_LEFT, 16, 193, 412, 20, 0);
+    app->status_label = control(app, L"STATIC", L"Selecting an audio device...", SS_LEFT | SS_NOPREFIX, 16, 66, 572, 24, 0);
+    control(app, L"STATIC", L"Audio source", SS_LEFT, 16, 100, 572, 20, 0);
+    app->device_combo = control(app, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL, 28, 122, 470, 200, ID_DEVICE);
+    control(app, L"BUTTON", L"Refresh", BS_PUSHBUTTON, 506, 121, 82, 27, ID_REFRESH);
+    app->format_label = control(app, L"STATIC", L"", SS_LEFT | SS_NOPREFIX, 28, 153, 560, 18, 0);
+    control(app, L"STATIC", L"Taskbar overlay", SS_LEFT, 16, 193, 572, 20, 0);
     control(app, L"STATIC", L"Side", SS_LEFT, 28, 219, 120, 22, 0);
     app->side_combo = control(app, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST, 151, 215, 112, 100, ID_SIDE);
     SendMessageW(app->side_combo, CB_ADDSTRING, 0, (LPARAM)L"Left");
@@ -150,6 +218,10 @@ static void create_controls(App *app) {
     SendMessageW(app->loudness_check, BM_SETCHECK, app->settings.show_loudness ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageW(app->system_check, BM_SETCHECK, app->settings.show_system ? BST_CHECKED : BST_UNCHECKED, 0);
     control(app, L"BUTTON", L"Reset meter", BS_PUSHBUTTON, 330, 343, 86, 27, ID_RESET);
+    control(app, L"STATIC", L"Startup", SS_LEFT, 16, 383, 572, 20, 0);
+    app->autostart_check = control(app, L"BUTTON", L"Start automatically when I sign in", BS_AUTOCHECKBOX, 28, 407, 260, 24, ID_AUTOSTART);
+    SetWindowTheme(app->autostart_check, L"", L"");
+    SendMessageW(app->autostart_check, BM_SETCHECK, autostart_is_enabled() ? BST_CHECKED : BST_UNCHECKED, 0);
     populate_monitors(app);
     populate_devices(app);
 }
@@ -157,6 +229,11 @@ static void create_controls(App *app) {
 void settings_window_show(App *app) {
     ShowWindow(app->settings_window, SW_SHOW);
     SetForegroundWindow(app->settings_window);
+    if (GetTickCount64() - app->last_activity_probe_tick >= 10000) start_activity_probe(app);
+}
+
+void settings_window_dispose(App *app) {
+    stop_activity_probe(app);
 }
 
 static bool button_checked(HWND button) {
@@ -181,7 +258,10 @@ static void handle_command(App *app, int id, int notification) {
     if (id == ID_REFRESH) populate_devices(app);
     else if (id == ID_RESET) audio_reset(&app->audio);
     else if (id == ID_DEVICE && notification == CBN_SELCHANGE) select_device(app, (int)SendMessageW(app->device_combo, CB_GETCURSEL, 0, 0));
-    else if (id == ID_SIDE && notification == CBN_SELCHANGE) {
+    else if (id == ID_DEVICE && notification == CBN_CLOSEUP && app->activity_sort_pending) {
+        app->activity_sort_pending = false;
+        rebuild_device_combo(app);
+    } else if (id == ID_SIDE && notification == CBN_SELCHANGE) {
         app->settings.right_aligned = SendMessageW(app->side_combo, CB_GETCURSEL, 0, 0) == 1;
         overlay_position(app);
     } else if (id == ID_MONITOR && notification == CBN_SELCHANGE) {
@@ -189,7 +269,13 @@ static void handle_command(App *app, int id, int notification) {
         if (selected >= 0 && selected < app->monitor_count) app->selected_monitor = selected;
         overlay_position(app);
     } else if (id == ID_ZERO && notification == EN_KILLFOCUS) settings_window_apply_zero(app);
-    else if ((id == ID_LOUDNESS || id == ID_SYSTEM) && notification == BN_CLICKED) update_visible_values(app, id);
+    else if (id == ID_AUTOSTART && notification == BN_CLICKED) {
+        bool enabled = button_checked(app->autostart_check);
+        if (!autostart_set_enabled(enabled)) {
+            SendMessageW(app->autostart_check, BM_SETCHECK, enabled ? BST_UNCHECKED : BST_CHECKED, 0);
+            app_set_status(app, L"Windows startup setting could not be updated.");
+        }
+    } else if ((id == ID_LOUDNESS || id == ID_SYSTEM) && notification == BN_CLICKED) update_visible_values(app, id);
 }
 
 LRESULT CALLBACK settings_window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -211,8 +297,18 @@ LRESULT CALLBACK settings_window_proc(HWND window, UINT message, WPARAM wparam, 
         }
         break;
     case WM_GETMINMAXINFO:
-        ((MINMAXINFO *)lparam)->ptMinTrackSize.x = 460;
-        ((MINMAXINFO *)lparam)->ptMinTrackSize.y = 430;
+        ((MINMAXINFO *)lparam)->ptMinTrackSize.x = SETTINGS_MIN_WIDTH;
+        ((MINMAXINFO *)lparam)->ptMinTrackSize.y = SETTINGS_MIN_HEIGHT;
+        return 0;
+    case WM_ACTIVITY_READY:
+        if ((UINT)wparam != app->activity_generation) return 0;
+        stop_activity_probe(app);
+        for (int i = 0; i < app->device_count; ++i)
+            app->devices[i].has_audio = app->device_activity[i];
+        if (app->selected_device >= 0 && app->selected_device < app->device_count && app->meter_snapshot.recent_audio)
+            app->devices[app->selected_device].has_audio = true;
+        if (SendMessageW(app->device_combo, CB_GETDROPPEDSTATE, 0, 0)) app->activity_sort_pending = true;
+        else rebuild_device_combo(app);
         return 0;
     case WM_COMMAND:
         handle_command(app, LOWORD(wparam), HIWORD(wparam));

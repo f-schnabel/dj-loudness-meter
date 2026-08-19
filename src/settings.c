@@ -20,8 +20,8 @@ static void settings_path(wchar_t *path, size_t count) {
 
 void settings_defaults(AppSettings *s) {
     ZeroMemory(s, sizeof(*s));
-    s->window_width = 460;
-    s->window_height = 430;
+    s->window_width = SETTINGS_MIN_WIDTH;
+    s->window_height = SETTINGS_MIN_HEIGHT;
     s->show_loudness = true;
     s->show_system = true;
     s->refresh_ms = 500;
@@ -30,8 +30,8 @@ void settings_defaults(AppSettings *s) {
 }
 
 void settings_normalize(AppSettings *s) {
-    if (s->window_width < 460) s->window_width = 460;
-    if (s->window_height < 430) s->window_height = 430;
+    if (s->window_width < SETTINGS_MIN_WIDTH) s->window_width = SETTINGS_MIN_WIDTH;
+    if (s->window_height < SETTINGS_MIN_HEIGHT) s->window_height = SETTINGS_MIN_HEIGHT;
     if (s->window_width > 16384) s->window_width = 16384;
     if (s->window_height > 16384) s->window_height = 16384;
     if (s->refresh_ms < 10) s->refresh_ms = 10;
@@ -115,8 +115,8 @@ void settings_load(AppSettings *s) {
     s->window_x = get_int(json, "WindowLeft", 0);
     s->window_y = get_int(json, "WindowTop", 0);
     s->has_window_position = value_start(json, "WindowLeft") != NULL && value_start(json, "WindowTop") != NULL;
-    s->window_width = get_int(json, "WindowWidth", 460);
-    s->window_height = get_int(json, "WindowHeight", 410);
+    s->window_width = get_int(json, "WindowWidth", SETTINGS_MIN_WIDTH);
+    s->window_height = get_int(json, "WindowHeight", SETTINGS_MIN_HEIGHT);
     s->right_aligned = get_bool(json, "TaskbarRightAligned", false);
     s->show_loudness = get_bool(json, "ShowLoudnessValues", true);
     s->show_system = get_bool(json, "ShowSystemValues", true);

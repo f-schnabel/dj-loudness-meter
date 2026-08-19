@@ -8,6 +8,7 @@
 #include <math.h>
 #include <memory>
 #include <mmdeviceapi.h>
+#include <endpointvolume.h>
 #include <propvarutil.h>
 #include <stdlib.h>
 #include <wchar.h>
@@ -109,6 +110,7 @@ static int enumerate_playback(IMMDeviceEnumerator *enumerator, AudioDevice *devi
         swprintf_s(devices[result].name, _countof(devices[result].name), L"%s [playback]", friendly);
         devices[result].is_default = default_id && wcscmp(default_id.get(), id.get()) == 0;
         devices[result].is_direct = false;
+        devices[result].has_audio = false;
         ++result;
     }
     return result;
@@ -136,6 +138,7 @@ int audio_enumerate(AudioDevice *devices, int capacity) {
             );
             devices[result].is_default = false;
             devices[result].is_direct = true;
+            devices[result].has_audio = false;
             ++result;
         }
     }
@@ -152,6 +155,35 @@ int audio_enumerate(AudioDevice *devices, int capacity) {
             }
         }
     return result;
+}
+
+bool audio_probe_activity(const AudioDevice *devices, int count, bool *results, HANDLE stop_event) {
+    HRESULT initialized = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    auto com_cleanup = wil::scope_exit([initialized] {
+        if (SUCCEEDED(initialized)) CoUninitialize();
+    });
+    if (FAILED(initialized) && initialized != RPC_E_CHANGED_MODE) return false;
+    auto enumerator = wil::CoCreateInstanceNoThrow<IMMDeviceEnumerator>(__uuidof(MMDeviceEnumerator), CLSCTX_ALL);
+    if (!enumerator) return false;
+
+    wil::com_ptr_nothrow<IAudioMeterInformation> meters[AUDIO_MAX_DEVICES];
+    for (int i = 0; i < count; ++i) {
+        results[i] = false;
+        if (devices[i].is_direct) continue;
+        wil::com_ptr_nothrow<IMMDevice> device;
+        if (SUCCEEDED(enumerator->GetDevice(devices[i].id, device.put())))
+            device->Activate(__uuidof(IAudioMeterInformation), CLSCTX_ALL, NULL, meters[i].put_void());
+    }
+
+    const ULONGLONG deadline = GetTickCount64() + 1500;
+    do {
+        for (int i = 0; i < count; ++i) {
+            float peak = 0.0f;
+            if (meters[i] && SUCCEEDED(meters[i]->GetPeakValue(&peak)) && peak > 0.0001f) results[i] = true;
+        }
+        if (WaitForSingleObject(stop_event, 100) == WAIT_OBJECT_0) return false;
+    } while (GetTickCount64() < deadline);
+    return true;
 }
 
 static bool wave_format(WAVEFORMATEX *wave, int *channels, int *rate, int *bits, bool *is_float) {
@@ -211,8 +243,9 @@ static long __stdcall voicemeeter_callback(void *user, long command, void *data,
         int left = e->voicemeeter_offset + e->voicemeeter_pair * 2;
         if (left + 1 >= buffer->inputs || !buffer->read[left] || !buffer->read[left + 1]) return 0;
         for (long i = 0; i < buffer->samples; ++i) {
-            e->voicemeeter_buffer[i * 2] = buffer->read[left][i];
-            e->voicemeeter_buffer[i * 2 + 1] = buffer->read[left + 1][i];
+            size_t output = (size_t)i * 2;
+            e->voicemeeter_buffer[output] = buffer->read[left][i];
+            e->voicemeeter_buffer[output + 1] = buffer->read[left + 1][i];
         }
         LARGE_INTEGER now;
         QueryPerformanceCounter(&now);

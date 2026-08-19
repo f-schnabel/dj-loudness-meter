@@ -22,7 +22,7 @@ The transparent taskbar overlay shows sample peak, five-second peak hold, LUFS-M
 - Float audio is metered without conversion; PCM uses one reusable buffer
 - No FFT, waveform, recording, raw audio history, or growing work queue
 
-The settings window provides audio-source and monitor selection, left/right placement, display-zero reference, update-rate slider, loudness/system checkboxes, device refresh, and meter reset. Settings remain compatible with the previous JSON file under `%APPDATA%\DjLoudnessMeter`.
+The settings window provides audio-source and monitor selection, left/right placement, display-zero reference, update-rate slider, loudness/system checkboxes, sign-in autostart, device refresh, and meter reset. Audio sources with activity detected over a stable 1.5-second window are listed first. Settings remain compatible with the previous JSON file under `%APPDATA%\DjLoudnessMeter`.
 
 ## Requirements
 

@@ -12,7 +12,7 @@ target_include_directories(meter PUBLIC src)
 target_compile_options(meter PRIVATE /W4 /WX)
 
 add_executable(DjLoudnessMeter WIN32
-  src/main.cpp src/app.c src/audio.cpp src/automation.cpp src/overlay.c src/settings.c
+  src/main.cpp src/app.c src/audio.cpp src/automation.cpp src/autostart.c src/overlay.c src/settings.c
   src/settings_window.c src/system_metrics.c src/taskbar.c src/resource.rc)
 set(EBUR128_RELEASE_LIBRARY "${CMAKE_SOURCE_DIR}/artifacts/vcpkg_installed/x64-windows-static/lib/ebur128.lib")
 set(EBUR128_DEBUG_LIBRARY "${CMAKE_SOURCE_DIR}/artifacts/vcpkg_installed/x64-windows-static/debug/lib/ebur128.lib")
