@@ -86,7 +86,9 @@ static void draw_cell(HDC dc, App *app, RECT rect, const wchar_t *label, double 
     DrawTextW(dc, value, -1, &bottom, DT_RIGHT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
 }
 
-static void draw_system_cell(HDC dc, App *app, RECT rect, const wchar_t *label, double value, bool valid, const wchar_t *suffix) {
+static void draw_system_cell(
+    HDC dc, App *app, RECT rect, const wchar_t *label, double value, bool valid, const wchar_t *suffix, double warn, double red
+) {
     wchar_t text[32];
     if (valid) swprintf_s(text, _countof(text), L"%.0f%s", value, suffix);
     else wcscpy_s(text, _countof(text), L"N/A");
@@ -96,7 +98,7 @@ static void draw_system_cell(HDC dc, App *app, RECT rect, const wchar_t *label, 
     RECT top = rect;
     top.bottom = midpoint - 4;
     DrawTextW(dc, label, -1, &top, DT_CENTER | DT_BOTTOM | DT_SINGLELINE);
-    SetTextColor(dc, primary);
+    SetTextColor(dc, valid ? threshold_color(value, warn, red) : primary);
     SelectObject(dc, app->system_value_font);
     RECT bottom = rect;
     bottom.top = midpoint - 4;
@@ -138,14 +140,14 @@ static void paint_overlay(App *app, HDC dc, RECT bounds) {
     if (app->settings.show_system) {
         if (app->system_snapshot.has_temperature) {
             RECT r = {x, 0, x + 46, height};
-            draw_system_cell(dc, app, r, L"Temp", app->system_snapshot.temperature, true, L"\x00b0");
+            draw_system_cell(dc, app, r, L"Temp", app->system_snapshot.temperature, true, L"\x00b0", 70, 85);
             x += 46;
         }
         RECT r = {x, 0, x + 46, height};
-        draw_system_cell(dc, app, r, L"CPU", app->system_snapshot.cpu, app->system_snapshot.has_cpu, L"%");
+        draw_system_cell(dc, app, r, L"CPU", app->system_snapshot.cpu, app->system_snapshot.has_cpu, L"%", 75, 90);
         x += 46;
         r = (RECT){x, 0, x + 46, height};
-        draw_system_cell(dc, app, r, L"RAM", app->system_snapshot.memory, app->system_snapshot.has_memory, L"%");
+        draw_system_cell(dc, app, r, L"RAM", app->system_snapshot.memory, app->system_snapshot.has_memory, L"%", 80, 90);
     }
 }
 
