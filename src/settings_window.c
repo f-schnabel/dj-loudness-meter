@@ -227,7 +227,7 @@ static void create_controls(App *app) {
 }
 
 void settings_window_show(App *app) {
-    ShowWindow(app->settings_window, SW_SHOW);
+    ShowWindow(app->settings_window, SW_RESTORE);
     SetForegroundWindow(app->settings_window);
     if (GetTickCount64() - app->last_activity_probe_tick >= 10000) start_activity_probe(app);
 }

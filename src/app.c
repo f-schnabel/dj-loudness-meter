@@ -102,7 +102,7 @@ static void tick(App *app) {
 static void save_and_close(App *app) {
     app->closing = true;
     RECT rect;
-    if (GetWindowRect(app->settings_window, &rect)) {
+    if (!IsIconic(app->settings_window) && GetWindowRect(app->settings_window, &rect)) {
         app->settings.window_x = rect.left;
         app->settings.window_y = rect.top;
         app->settings.window_width = rect.right - rect.left;
@@ -271,10 +271,18 @@ int app_run(HINSTANCE instance, int show_command) {
     RegisterClassExW(&hit_class);
     RegisterClassExW(&overlay_class);
 
-    int x = app.settings.has_window_position ? app.settings.window_x : CW_USEDEFAULT;
-    int y = app.settings.has_window_position ? app.settings.window_y : CW_USEDEFAULT;
     int width = app.settings.window_width < SETTINGS_MIN_WIDTH ? SETTINGS_MIN_WIDTH : app.settings.window_width;
     int height = app.settings.window_height < SETTINGS_MIN_HEIGHT ? SETTINGS_MIN_HEIGHT : app.settings.window_height;
+    RECT saved_rect = {
+        app.settings.window_x,
+        app.settings.window_y,
+        app.settings.window_x + width,
+        app.settings.window_y + height
+    };
+    bool saved_position_visible =
+        app.settings.has_window_position && MonitorFromRect(&saved_rect, MONITOR_DEFAULTTONULL) != NULL;
+    int x = saved_position_visible ? app.settings.window_x : CW_USEDEFAULT;
+    int y = saved_position_visible ? app.settings.window_y : CW_USEDEFAULT;
     HWND settings = CreateWindowExW(
         0,
         settings_class.lpszClassName,
