@@ -99,26 +99,46 @@ static bool device_should_swap(const AudioDevice *left, const AudioDevice *right
     return _wcsicmp(left->name, right->name) > 0;
 }
 
-static void sort_devices(App *app) {
+static int find_device(const App *app, const wchar_t *id) {
+    for (int i = 0; i < app->device_count; ++i)
+        if (wcscmp(id, app->devices[i].id) == 0) return i;
+    return -1;
+}
+
+static int combo_device(const App *app) {
+    LRESULT row = SendMessageW(app->device_combo, CB_GETCURSEL, 0, 0);
+    if (row == CB_ERR) return -1;
+    LRESULT device = SendMessageW(app->device_combo, CB_GETITEMDATA, (WPARAM)row, 0);
+    return device == CB_ERR ? -1 : (int)device;
+}
+
+static void sort_device_order(const App *app, int *order) {
+    for (int i = 0; i < app->device_count; ++i)
+        order[i] = i;
     for (int i = 0; i < app->device_count; ++i)
         for (int j = i + 1; j < app->device_count; ++j)
-            if (device_should_swap(&app->devices[i], &app->devices[j])) {
-                AudioDevice temporary = app->devices[i];
-                app->devices[i] = app->devices[j];
-                app->devices[j] = temporary;
+            if (device_should_swap(&app->devices[order[i]], &app->devices[order[j]])) {
+                int temporary = order[i];
+                order[i] = order[j];
+                order[j] = temporary;
             }
 }
 
 static void rebuild_device_combo(App *app) {
-    sort_devices(app);
+    int order[AUDIO_MAX_DEVICES] = {0};
+    sort_device_order(app, order);
     SendMessageW(app->device_combo, CB_RESETCONTENT, 0, 0);
-    app->selected_device = -1;
-    for (int i = 0; i < app->device_count; ++i) {
-        SendMessageW(app->device_combo, CB_ADDSTRING, 0, (LPARAM)app->devices[i].name);
-        if (wcscmp(app->settings.endpoint_id, app->devices[i].id) == 0) app->selected_device = i;
+    int selected_row = -1;
+    app->selected_device = find_device(app, app->settings.endpoint_id);
+    if (app->selected_device < 0 && app->device_count) app->selected_device = order[0];
+    for (int row = 0; row < app->device_count; ++row) {
+        int device = order[row];
+        LRESULT added = SendMessageW(app->device_combo, CB_ADDSTRING, 0, (LPARAM)app->devices[device].name);
+        if (added == CB_ERR || added == CB_ERRSPACE) continue;
+        SendMessageW(app->device_combo, CB_SETITEMDATA, (WPARAM)added, device);
+        if (device == app->selected_device) selected_row = (int)added;
     }
-    if (app->selected_device < 0 && app->device_count) app->selected_device = 0;
-    SendMessageW(app->device_combo, CB_SETCURSEL, app->selected_device, 0);
+    SendMessageW(app->device_combo, CB_SETCURSEL, selected_row, 0);
 }
 
 static void stop_activity_probe(App *app) {
@@ -158,19 +178,14 @@ static void start_activity_probe(App *app) {
 static void populate_devices(App *app) {
     stop_activity_probe(app);
     audio_stop(&app->audio);
-    SendMessageW(app->device_combo, CB_RESETCONTENT, 0, 0);
     app->device_count = audio_enumerate(app->devices, AUDIO_MAX_DEVICES);
-    app->selected_device = -1;
-    for (int i = 0; i < app->device_count; ++i) {
-        SendMessageW(app->device_combo, CB_ADDSTRING, 0, (LPARAM)app->devices[i].name);
-        if ((app->settings.endpoint_id[0] && wcscmp(app->settings.endpoint_id, app->devices[i].id) == 0) ||
-            (!app->settings.endpoint_id[0] && app->devices[i].is_default))
-            app->selected_device = i;
-    }
+    app->selected_device = app->settings.endpoint_id[0] ? find_device(app, app->settings.endpoint_id) : -1;
+    for (int i = 0; app->selected_device < 0 && i < app->device_count; ++i)
+        if (app->devices[i].is_default) app->selected_device = i;
     if (app->selected_device < 0 && app->device_count) app->selected_device = 0;
     if (app->selected_device >= 0) {
-        SendMessageW(app->device_combo, CB_SETCURSEL, app->selected_device, 0);
         select_device(app, app->selected_device);
+        rebuild_device_combo(app);
     } else app_set_status(app, L"No supported audio sources are available.");
     start_activity_probe(app);
 }
@@ -257,7 +272,7 @@ static void update_visible_values(App *app, int changed_id) {
 static void handle_command(App *app, int id, int notification) {
     if (id == ID_REFRESH) populate_devices(app);
     else if (id == ID_RESET) audio_reset(&app->audio);
-    else if (id == ID_DEVICE && notification == CBN_SELCHANGE) select_device(app, (int)SendMessageW(app->device_combo, CB_GETCURSEL, 0, 0));
+    else if (id == ID_DEVICE && notification == CBN_SELCHANGE) select_device(app, combo_device(app));
     else if (id == ID_DEVICE && notification == CBN_CLOSEUP && app->activity_sort_pending) {
         app->activity_sort_pending = false;
         rebuild_device_combo(app);
