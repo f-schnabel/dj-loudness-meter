@@ -24,6 +24,8 @@ The transparent taskbar overlay shows sample peak, five-second peak hold, LUFS-M
 
 The settings window provides audio-source and monitor selection, left/right placement, display-zero reference, update-rate slider, loudness/system checkboxes, sign-in autostart, device refresh, and meter reset. Audio sources with activity detected over a stable 1.5-second window are listed first. Settings remain compatible with the previous JSON file under `%APPDATA%\DjLoudnessMeter`.
 
+Monitor selection is saved immediately using the monitor's device interface ID, so display renumbering (including VR headset connections) does not change the target. Display changes refresh placement without continuous polling. If the selected monitor is unavailable, the overlay temporarily uses the main display and returns when the selected monitor reconnects. Older settings migrate when their saved display is found; select the intended monitor once if its number has already changed.
+
 ## Requirements
 
 - Windows 10 2004 or newer, or Windows 11, x64

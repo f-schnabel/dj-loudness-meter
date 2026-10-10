@@ -13,7 +13,7 @@ target_compile_options(meter PRIVATE /W4 /WX)
 
 add_executable(DjLoudnessMeter WIN32
   src/main.cpp src/app.c src/audio.cpp src/automation.cpp src/autostart.c src/overlay.c src/settings.c
-  src/settings_window.c src/system_metrics.c src/taskbar.c src/resource.rc)
+  src/settings_window.c src/system_metrics.c src/taskbar.c src/monitors.c src/resource.rc)
 set(EBUR128_RELEASE_LIBRARY "${CMAKE_SOURCE_DIR}/artifacts/vcpkg_installed/x64-windows-static/lib/ebur128.lib")
 set(EBUR128_DEBUG_LIBRARY "${CMAKE_SOURCE_DIR}/artifacts/vcpkg_installed/x64-windows-static/debug/lib/ebur128.lib")
 set(VCPKG_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/artifacts/vcpkg_installed/x64-windows-static/include")
@@ -30,7 +30,7 @@ target_link_libraries(DjLoudnessMeter PRIVATE meter WIL::WIL
   optimized "${EBUR128_RELEASE_LIBRARY}" debug "${EBUR128_DEBUG_LIBRARY}"
   ole32 oleaut32 uuid propsys comctl32 avrt pdh dwmapi uxtheme advapi32)
 
-add_executable(native_tests tests/native_tests.c src/settings.c)
+add_executable(native_tests tests/native_tests.c src/settings.c src/monitors.c)
 target_include_directories(native_tests PRIVATE src)
 target_compile_options(native_tests PRIVATE /W4 /WX)
 target_link_libraries(native_tests PRIVATE meter)

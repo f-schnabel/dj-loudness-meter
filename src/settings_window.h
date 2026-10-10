@@ -7,5 +7,6 @@ LRESULT CALLBACK settings_window_proc(HWND window, UINT message, WPARAM wparam, 
 void settings_window_apply_zero(App *app);
 void settings_window_dispose(App *app);
 void settings_window_show(App *app);
+void settings_window_refresh_monitors(App *app);
 
 #endif

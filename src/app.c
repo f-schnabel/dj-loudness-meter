@@ -10,6 +10,7 @@
 #define ID_CLOSE_APP 1010
 #define ID_OPEN_SETTINGS 1011
 #define TIMER_UI 1
+#define TIMER_MONITORS 2
 
 static LRESULT CALLBACK hit_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
 static LRESULT CALLBACK overlay_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
@@ -26,40 +27,20 @@ static WNDCLASSEXW make_window_class(HINSTANCE instance, HICON icon, const wchar
     return result;
 }
 
-static BOOL CALLBACK monitor_callback(HMONITOR monitor, HDC dc, LPRECT rect, LPARAM data) {
-    (void)dc;
-    (void)rect;
-    App *app = (App *)data;
-    if (app->monitor_count >= MAX_MONITORS) return FALSE;
-
-    MONITORINFOEXW info = {sizeof(info)};
-    if (!GetMonitorInfoW(monitor, (MONITORINFO *)&info)) return TRUE;
-
-    DisplayInfo *display = &app->monitors[app->monitor_count++];
-    wcscpy_s(display->device, _countof(display->device), info.szDevice);
-    display->bounds = info.rcMonitor;
-    display->work = info.rcWork;
-    display->primary = (info.dwFlags & MONITORINFOF_PRIMARY) != 0;
-    return TRUE;
+static void enumerate_monitors(App *app) {
+    app->monitor_count = monitors_enumerate(app->monitors, DJLM_MAX_MONITORS);
+    app->selected_monitor = monitors_select(app->monitors, app->monitor_count, &app->settings);
+    if (app->selected_monitor >= 0 && !app->settings.monitor_id[0]) {
+        const DisplayInfo *selected = &app->monitors[app->selected_monitor];
+        if (!app->settings.monitor_name[0] || _wcsicmp(app->settings.monitor_name, selected->device) == 0)
+            monitors_remember(&app->settings, selected);
+    }
 }
 
-static void enumerate_monitors(App *app) {
-    app->monitor_count = 0;
-    EnumDisplayMonitors(NULL, NULL, monitor_callback, (LPARAM)app);
-    app->selected_monitor = 0;
-    for (int i = 0; i < app->monitor_count; ++i) {
-        swprintf_s(
-            app->monitors[i].label,
-            _countof(app->monitors[i].label),
-            L"Display %d%s",
-            i + 1,
-            app->monitors[i].primary ? L" (Main)" : L""
-        );
-        if ((app->settings.monitor_name[0] && _wcsicmp(app->settings.monitor_name, app->monitors[i].device) == 0) ||
-            (!app->settings.monitor_name[0] && app->monitors[i].primary)) {
-            app->selected_monitor = i;
-        }
-    }
+static void refresh_monitors(App *app) {
+    enumerate_monitors(app);
+    settings_window_refresh_monitors(app);
+    if (!app->menu_open) overlay_position(app);
 }
 
 static void set_text_if_changed(HWND window, wchar_t *current, size_t count, const wchar_t *next) {
@@ -99,8 +80,7 @@ static void tick(App *app) {
     InvalidateRect(app->overlay_window, NULL, FALSE);
 }
 
-static void save_and_close(App *app) {
-    app->closing = true;
+void app_save_settings(App *app) {
     RECT rect;
     if (!IsIconic(app->settings_window) && GetWindowRect(app->settings_window, &rect)) {
         app->settings.window_x = rect.left;
@@ -108,11 +88,13 @@ static void save_and_close(App *app) {
         app->settings.window_width = rect.right - rect.left;
         app->settings.window_height = rect.bottom - rect.top;
     }
-    if (app->monitor_count) {
-        wcscpy_s(app->settings.monitor_name, _countof(app->settings.monitor_name), app->monitors[app->selected_monitor].device);
-    }
     settings_window_apply_zero(app);
     settings_save(&app->settings);
+}
+
+static void save_and_close(App *app) {
+    app->closing = true;
+    app_save_settings(app);
     PostQuitMessage(0);
 }
 
@@ -180,7 +162,17 @@ static LRESULT CALLBACK overlay_proc(HWND window, UINT message, WPARAM wparam, L
 
     switch (message) {
     case WM_TIMER:
-        tick(app);
+        if (wparam == TIMER_MONITORS) {
+            KillTimer(window, TIMER_MONITORS);
+            refresh_monitors(app);
+        } else if (wparam == TIMER_UI) tick(app);
+        return 0;
+    case WM_DISPLAYCHANGE:
+        // Coalesce display changes while Windows is rebuilding the desktop.
+        if (!SetTimer(window, TIMER_MONITORS, 500, NULL)) refresh_monitors(app);
+        return 0;
+    case WM_SETTINGCHANGE:
+        if (wparam == SPI_SETWORKAREA && !SetTimer(window, TIMER_MONITORS, 500, NULL)) refresh_monitors(app);
         return 0;
     case WM_CLOSE:
         save_and_close(app);
@@ -273,14 +265,8 @@ int app_run(HINSTANCE instance, int show_command) {
 
     int width = app.settings.window_width < SETTINGS_MIN_WIDTH ? SETTINGS_MIN_WIDTH : app.settings.window_width;
     int height = app.settings.window_height < SETTINGS_MIN_HEIGHT ? SETTINGS_MIN_HEIGHT : app.settings.window_height;
-    RECT saved_rect = {
-        app.settings.window_x,
-        app.settings.window_y,
-        app.settings.window_x + width,
-        app.settings.window_y + height
-    };
-    bool saved_position_visible =
-        app.settings.has_window_position && MonitorFromRect(&saved_rect, MONITOR_DEFAULTTONULL) != NULL;
+    RECT saved_rect = {app.settings.window_x, app.settings.window_y, app.settings.window_x + width, app.settings.window_y + height};
+    bool saved_position_visible = app.settings.has_window_position && MonitorFromRect(&saved_rect, MONITOR_DEFAULTTONULL) != NULL;
     int x = saved_position_visible ? app.settings.window_x : CW_USEDEFAULT;
     int y = saved_position_visible ? app.settings.window_y : CW_USEDEFAULT;
     HWND settings = CreateWindowExW(

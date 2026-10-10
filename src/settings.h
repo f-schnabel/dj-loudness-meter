@@ -10,6 +10,7 @@
 typedef struct {
     wchar_t endpoint_id[512];
     wchar_t monitor_name[32];
+    wchar_t monitor_id[128];
     int window_x, window_y, window_width, window_height;
     bool has_window_position, right_aligned, show_loudness, show_system;
     int refresh_ms, peak_hold_ms;

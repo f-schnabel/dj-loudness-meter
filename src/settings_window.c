@@ -190,7 +190,8 @@ static void populate_devices(App *app) {
     start_activity_probe(app);
 }
 
-static void populate_monitors(App *app) {
+void settings_window_refresh_monitors(App *app) {
+    if (!app->monitor_combo) return;
     SendMessageW(app->monitor_combo, CB_RESETCONTENT, 0, 0);
     for (int i = 0; i < app->monitor_count; ++i)
         SendMessageW(app->monitor_combo, CB_ADDSTRING, 0, (LPARAM)app->monitors[i].label);
@@ -237,7 +238,7 @@ static void create_controls(App *app) {
     app->autostart_check = control(app, L"BUTTON", L"Start automatically when I sign in", BS_AUTOCHECKBOX, 28, 407, 260, 24, ID_AUTOSTART);
     SetWindowTheme(app->autostart_check, L"", L"");
     SendMessageW(app->autostart_check, BM_SETCHECK, autostart_is_enabled() ? BST_CHECKED : BST_UNCHECKED, 0);
-    populate_monitors(app);
+    settings_window_refresh_monitors(app);
     populate_devices(app);
 }
 
@@ -281,7 +282,11 @@ static void handle_command(App *app, int id, int notification) {
         overlay_position(app);
     } else if (id == ID_MONITOR && notification == CBN_SELCHANGE) {
         int selected = (int)SendMessageW(app->monitor_combo, CB_GETCURSEL, 0, 0);
-        if (selected >= 0 && selected < app->monitor_count) app->selected_monitor = selected;
+        if (selected >= 0 && selected < app->monitor_count) {
+            app->selected_monitor = selected;
+            monitors_remember(&app->settings, &app->monitors[selected]);
+            app_save_settings(app);
+        }
         overlay_position(app);
     } else if (id == ID_ZERO && notification == EN_KILLFOCUS) settings_window_apply_zero(app);
     else if (id == ID_AUTOSTART && notification == BN_CLICKED) {
@@ -304,6 +309,13 @@ LRESULT CALLBACK settings_window_proc(HWND window, UINT message, WPARAM wparam, 
     switch (message) {
     case WM_CREATE:
         create_controls(app);
+        return 0;
+    case WM_ENDSESSION:
+        if (wparam) {
+            app->closing = true;
+            app_save_settings(app);
+            PostQuitMessage(0);
+        }
         return 0;
     case WM_CLOSE:
         if (!app->closing) {

@@ -2,17 +2,10 @@
 #define DJLM_APP_H
 
 #include "audio.h"
+#include "monitors.h"
 #include "settings.h"
 #include "system_metrics.h"
 #include <windows.h>
-
-#define MAX_MONITORS 16
-
-typedef struct {
-    wchar_t device[32], label[64];
-    RECT bounds, work;
-    bool primary;
-} DisplayInfo;
 
 typedef struct {
     HINSTANCE instance;
@@ -37,7 +30,7 @@ typedef struct {
     HANDLE activity_thread, activity_stop_event;
     ULONGLONG last_activity_probe_tick;
     UINT activity_generation;
-    DisplayInfo monitors[MAX_MONITORS];
+    DisplayInfo monitors[DJLM_MAX_MONITORS];
     int monitor_count, selected_monitor;
     wchar_t status_text[512], format_text[128];
     ULONGLONG last_system_tick, last_status_tick;
@@ -50,6 +43,7 @@ extern "C" {
 
 int app_run(HINSTANCE instance, int show_command);
 void app_set_status(App *app, const wchar_t *text);
+void app_save_settings(App *app);
 
 #ifdef __cplusplus
 }

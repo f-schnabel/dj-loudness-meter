@@ -112,6 +112,7 @@ void settings_load(AppSettings *s) {
     json[n] = 0;
     get_string(json, "SelectedAudioEndpointId", s->endpoint_id, _countof(s->endpoint_id));
     get_string(json, "TaskbarMonitorDeviceName", s->monitor_name, _countof(s->monitor_name));
+    get_string(json, "TaskbarMonitorDeviceId", s->monitor_id, _countof(s->monitor_id));
     s->window_x = get_int(json, "WindowLeft", 0);
     s->window_y = get_int(json, "WindowTop", 0);
     s->has_window_position = value_start(json, "WindowLeft") != NULL && value_start(json, "WindowTop") != NULL;
@@ -151,14 +152,15 @@ void settings_save(const AppSettings *s) {
     wcscat_s(temporary, _countof(temporary), L".tmp");
     FILE *file = NULL;
     if (_wfopen_s(&file, temporary, L"wb") || !file) return;
-    char endpoint[1024], monitor[128];
+    char endpoint[1024], monitor[128], monitor_id[1024];
     escaped_utf8(s->endpoint_id, endpoint, sizeof(endpoint));
     escaped_utf8(s->monitor_name, monitor, sizeof(monitor));
+    escaped_utf8(s->monitor_id, monitor_id, sizeof(monitor_id));
     int written = fprintf(
         file,
         "{\n  \"SelectedAudioEndpointId\": \"%s\",\n  \"WindowLeft\": %d,\n  \"WindowTop\": %d,\n"
         "  \"WindowWidth\": %d,\n  \"WindowHeight\": %d,\n  \"AlwaysOnTop\": false,\n"
-        "  \"TaskbarMonitorDeviceName\": \"%s\",\n  \"TaskbarRightAligned\": %s,\n"
+        "  \"TaskbarMonitorDeviceName\": \"%s\",\n  \"TaskbarMonitorDeviceId\": \"%s\",\n  \"TaskbarRightAligned\": %s,\n"
         "  \"ShowLoudnessValues\": %s,\n  \"ShowSystemValues\": %s,\n  \"UiRefreshMilliseconds\": %d,\n"
         "  \"PeakHoldMilliseconds\": %d,\n  \"DisplayZeroDbfs\": %.1f\n}\n",
         endpoint,
@@ -167,6 +169,7 @@ void settings_save(const AppSettings *s) {
         s->window_width,
         s->window_height,
         monitor,
+        monitor_id,
         s->right_aligned ? "true" : "false",
         s->show_loudness ? "true" : "false",
         s->show_system ? "true" : "false",

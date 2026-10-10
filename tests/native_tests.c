@@ -1,4 +1,5 @@
 #include "meter.h"
+#include "monitors.h"
 #include "settings.h"
 #ifdef NDEBUG
 #undef NDEBUG
@@ -7,6 +8,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 static void assert_near(double actual, double expected, double tolerance) {
     assert(fabs(actual - expected) <= tolerance);
@@ -94,11 +96,92 @@ static void test_settings_normalization(void) {
     assert_near(settings.display_zero, 0.0, 0.0);
 }
 
+static void test_monitor_selection(void) {
+    AppSettings settings;
+    settings_defaults(&settings);
+    DisplayInfo monitors[3] = {0};
+    wcscpy_s(monitors[0].device, _countof(monitors[0].device), L"\\\\.\\DISPLAY3");
+    wcscpy_s(monitors[0].identity, _countof(monitors[0].identity), L"headset");
+    wcscpy_s(monitors[1].device, _countof(monitors[1].device), L"\\\\.\\DISPLAY1");
+    wcscpy_s(monitors[1].identity, _countof(monitors[1].identity), L"main");
+    monitors[1].primary = true;
+    wcscpy_s(monitors[2].device, _countof(monitors[2].device), L"\\\\.\\DISPLAY2");
+    wcscpy_s(monitors[2].identity, _countof(monitors[2].identity), L"second");
+    assert(monitors_select(monitors, 3, &settings) == 1);
+    assert(monitors_select(monitors, 0, &settings) == -1);
+
+    // Existing settings still resolve by GDI name, then gain an identity.
+    wcscpy_s(settings.monitor_name, _countof(settings.monitor_name), monitors[2].device);
+    assert(monitors_select(monitors, 3, &settings) == 2);
+    monitors_remember(&settings, &monitors[2]);
+    assert(wcscmp(settings.monitor_id, L"second") == 0);
+
+    // The headset takes the old GDI name; the intended monitor gets a new one.
+    wcscpy_s(monitors[0].device, _countof(monitors[0].device), L"\\\\.\\DISPLAY2");
+    wcscpy_s(monitors[2].device, _countof(monitors[2].device), L"\\\\.\\DISPLAY4");
+    assert(monitors_select(monitors, 3, &settings) == 2);
+    DisplayInfo swapped = monitors[0];
+    monitors[0] = monitors[2];
+    monitors[2] = swapped;
+    assert(monitors_select(monitors, 3, &settings) == 0);
+
+    // Missing preferred monitor uses the main display without forgetting the preference.
+    assert(monitors_select(monitors + 1, 2, &settings) == 0);
+    assert(wcscmp(settings.monitor_id, L"second") == 0);
+    assert(monitors_select(monitors, 3, &settings) == 0);
+    wcscpy_s(settings.monitor_id, _countof(settings.monitor_id), L"SECOND");
+    assert(monitors_select(monitors, 3, &settings) == 0);
+
+    // An unavailable legacy display also falls back to primary, regardless of enumeration order.
+    settings.monitor_id[0] = 0;
+    wcscpy_s(settings.monitor_name, _countof(settings.monitor_name), L"missing");
+    assert(monitors_select(monitors, 3, &settings) == 1);
+}
+
+static void test_monitor_settings_roundtrip(void) {
+    wchar_t original_appdata[32768], temporary[MAX_PATH], directory[MAX_PATH], path[MAX_PATH];
+    DWORD original_length = GetEnvironmentVariableW(L"APPDATA", original_appdata, _countof(original_appdata));
+    assert(original_length < _countof(original_appdata));
+    assert(GetTempPathW(_countof(temporary), temporary));
+    assert(GetTempFileNameW(temporary, L"djl", 0, directory));
+    assert(DeleteFileW(directory));
+    assert(CreateDirectoryW(directory, NULL));
+    assert(SetEnvironmentVariableW(L"APPDATA", directory));
+
+    AppSettings saved, loaded;
+    settings_defaults(&saved);
+    wcscpy_s(saved.monitor_name, _countof(saved.monitor_name), L"\\\\.\\DISPLAY2");
+    wcscpy_s(saved.monitor_id, _countof(saved.monitor_id), L"\\\\?\\DISPLAY#SECOND#instance#{monitor-guid}");
+    settings_save(&saved);
+    settings_load(&loaded);
+    assert(wcscmp(loaded.monitor_name, saved.monitor_name) == 0);
+    assert(wcscmp(loaded.monitor_id, saved.monitor_id) == 0);
+
+    wcscpy_s(path, _countof(path), directory);
+    wcscat_s(path, _countof(path), L"\\DjLoudnessMeter\\settings.json");
+    FILE *legacy = NULL;
+    assert(_wfopen_s(&legacy, path, L"wb") == 0 && legacy);
+    assert(fputs("{\"TaskbarMonitorDeviceName\":\"\\\\\\\\.\\\\DISPLAY2\"}", legacy) >= 0);
+    assert(fclose(legacy) == 0);
+    settings_load(&loaded);
+    assert(wcscmp(loaded.monitor_name, saved.monitor_name) == 0);
+    assert(!loaded.monitor_id[0]);
+
+    assert(SetEnvironmentVariableW(L"APPDATA", original_length ? original_appdata : NULL));
+    assert(DeleteFileW(path));
+    wcscpy_s(path, _countof(path), directory);
+    wcscat_s(path, _countof(path), L"\\DjLoudnessMeter");
+    assert(RemoveDirectoryW(path));
+    assert(RemoveDirectoryW(directory));
+}
+
 int main(void) {
     test_peaks();
     test_pcm();
     test_display();
     test_settings_normalization();
+    test_monitor_selection();
+    test_monitor_settings_roundtrip();
     puts("native tests passed");
     return 0;
 }
