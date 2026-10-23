@@ -374,17 +374,24 @@ static const wchar_t *process_packets(AudioEngine *e, CaptureSession *session) {
     if (FAILED(session->client->Start())) return L"WASAPI loopback capture could not start.";
     auto stop_client = wil::scope_exit([session] { session->client->Stop(); });
 
+    wil::com_ptr_nothrow<IAudioMeterInformation> activity_meter;
+    bool activity_meter_queried = false;
+    int stalled_timeouts = 0;
     HANDLE waits[2] = {e->stop_event, session->packet_event.get()};
     for (;;) {
-        DWORD wait = WaitForMultipleObjects(2, waits, FALSE, INFINITE);
+        // Some driver resets invalidate the stream without signaling its packet event.
+        // A slow fallback also drains packets if the driver loses event notifications.
+        DWORD wait = WaitForMultipleObjects(2, waits, FALSE, 2000);
         if (wait == WAIT_OBJECT_0) break;
-        if (wait != WAIT_OBJECT_0 + 1) return L"Audio capture wait failed.";
+        if (wait != WAIT_OBJECT_0 + 1 && wait != WAIT_TIMEOUT) return L"Audio capture wait failed.";
 
+        bool received_packet = false;
         UINT32 packet = 0;
         for (;;) {
             HRESULT next_result = session->capture->GetNextPacketSize(&packet);
             if (FAILED(next_result)) return L"The playback device disconnected or WASAPI capture failed.";
             if (!packet) break;
+            received_packet = true;
 
             BYTE *data = NULL;
             UINT32 frames = 0;
@@ -434,6 +441,18 @@ static const wchar_t *process_packets(AudioEngine *e, CaptureSession *session) {
             }
             if (reset_failed) return L"libebur128 reset failed.";
         }
+        if (wait == WAIT_TIMEOUT && !received_packet) {
+            // A stream can remain open but stop delivering audio after a driver restart.
+            // Query endpoint activity only on this slow path; silence alone must not restart capture.
+            if (!activity_meter_queried) {
+                activity_meter_queried = true;
+                session->device->Activate(__uuidof(IAudioMeterInformation), CLSCTX_ALL, NULL, activity_meter.put_void());
+            }
+            float peak = 0.0f;
+            if (activity_meter && SUCCEEDED(activity_meter->GetPeakValue(&peak)) && peak > 0.0001f) {
+                if (++stalled_timeouts >= 2) return L"Audio capture stalled. Reconnecting...";
+            } else stalled_timeouts = 0;
+        } else stalled_timeouts = 0;
     }
     return NULL;
 }

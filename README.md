@@ -24,6 +24,8 @@ The transparent taskbar overlay shows sample peak, five-second peak hold, LUFS-M
 
 The settings window provides audio-source and monitor selection, left/right placement, display-zero reference, update-rate slider, loudness/system checkboxes, sign-in autostart, device refresh, and meter reset. Audio sources with activity detected over a stable 1.5-second window are listed first. Settings remain compatible with the previous JSON file under `%APPDATA%\DjLoudnessMeter`.
 
+Audio-source changes are saved immediately. If the saved source is unavailable at sign-in, the app waits for it instead of switching outputs. Failed capture retries every three seconds; a two-second fallback checks WASAPI streams even when a driver stops sending audio events.
+
 Monitor selection is saved immediately using the monitor's device interface ID, so display renumbering (including VR headset connections) does not change the target. Display changes refresh placement without continuous polling. If the selected monitor is unavailable, the overlay temporarily uses the main display and returns when the selected monitor reconnects. Older settings migrate when their saved display is found; select the intended monitor once if its number has already changed.
 
 ## Requirements

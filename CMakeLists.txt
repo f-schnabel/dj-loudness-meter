@@ -35,8 +35,16 @@ target_include_directories(native_tests PRIVATE src)
 target_compile_options(native_tests PRIVATE /W4 /WX)
 target_link_libraries(native_tests PRIVATE meter)
 
+add_executable(audio_recovery_tests tests/audio_recovery_tests.c src/settings_window.c src/settings.c src/monitors.c)
+target_include_directories(audio_recovery_tests PRIVATE src)
+target_compile_definitions(audio_recovery_tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+target_compile_options(audio_recovery_tests PRIVATE /W4 /WX)
+target_link_options(audio_recovery_tests PRIVATE "/MANIFESTINPUT:${CMAKE_SOURCE_DIR}/app.manifest")
+target_link_libraries(audio_recovery_tests PRIVATE meter comctl32 uxtheme)
+
 enable_testing()
 add_test(NAME native_tests COMMAND native_tests)
+add_test(NAME audio_recovery_tests COMMAND audio_recovery_tests)
 
 find_program(POWERSHELL_EXECUTABLE NAMES pwsh powershell REQUIRED)
 add_custom_target(format

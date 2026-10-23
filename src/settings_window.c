@@ -19,6 +19,7 @@
 #define ID_RESET 1009
 #define ID_AUTOSTART 1012
 #define TIMER_UI 1
+#define TIMER_AUDIO_RECOVERY 2
 #define WM_ACTIVITY_READY (WM_APP + 1)
 
 static const int refresh_intervals[] = {10, 50, 125, 250, 500, 750, 1000, 1250, 1500, 1750, 2000};
@@ -130,7 +131,6 @@ static void rebuild_device_combo(App *app) {
     SendMessageW(app->device_combo, CB_RESETCONTENT, 0, 0);
     int selected_row = -1;
     app->selected_device = find_device(app, app->settings.endpoint_id);
-    if (app->selected_device < 0 && app->device_count) app->selected_device = order[0];
     for (int row = 0; row < app->device_count; ++row) {
         int device = order[row];
         LRESULT added = SendMessageW(app->device_combo, CB_ADDSTRING, 0, (LPARAM)app->devices[device].name);
@@ -180,14 +180,31 @@ static void populate_devices(App *app) {
     audio_stop(&app->audio);
     app->device_count = audio_enumerate(app->devices, AUDIO_MAX_DEVICES);
     app->selected_device = app->settings.endpoint_id[0] ? find_device(app, app->settings.endpoint_id) : -1;
-    for (int i = 0; app->selected_device < 0 && i < app->device_count; ++i)
-        if (app->devices[i].is_default) app->selected_device = i;
-    if (app->selected_device < 0 && app->device_count) app->selected_device = 0;
+    // A saved source may appear late at sign-in. Never replace it with a headset/default.
+    if (!app->settings.endpoint_id[0]) {
+        for (int i = 0; app->selected_device < 0 && i < app->device_count; ++i)
+            if (app->devices[i].is_default) app->selected_device = i;
+        if (app->selected_device < 0 && app->device_count) app->selected_device = 0;
+    }
     if (app->selected_device >= 0) {
         select_device(app, app->selected_device);
-        rebuild_device_combo(app);
-    } else app_set_status(app, L"No supported audio sources are available.");
+    } else
+        app_set_status(
+            app,
+            app->settings.endpoint_id[0] ? L"Waiting for the saved audio source..." : L"No supported audio sources are available."
+        );
+    rebuild_device_combo(app);
     start_activity_probe(app);
+}
+
+static void recover_audio(App *app) {
+    if (app->closing) return;
+    if (app->selected_device < 0) {
+        populate_devices(app);
+    } else if (!app->audio.thread || WaitForSingleObject(app->audio.thread, 0) == WAIT_OBJECT_0) {
+        // Capture can fail while drivers/services are still starting, or after a device reset.
+        if (!audio_start(&app->audio, app->settings.endpoint_id)) report_start_failure(app);
+    }
 }
 
 void settings_window_refresh_monitors(App *app) {
@@ -240,6 +257,7 @@ static void create_controls(App *app) {
     SendMessageW(app->autostart_check, BM_SETCHECK, autostart_is_enabled() ? BST_CHECKED : BST_UNCHECKED, 0);
     settings_window_refresh_monitors(app);
     populate_devices(app);
+    SetTimer(app->settings_window, TIMER_AUDIO_RECOVERY, 3000, NULL);
 }
 
 void settings_window_show(App *app) {
@@ -249,6 +267,7 @@ void settings_window_show(App *app) {
 }
 
 void settings_window_dispose(App *app) {
+    KillTimer(app->settings_window, TIMER_AUDIO_RECOVERY);
     stop_activity_probe(app);
 }
 
@@ -273,8 +292,10 @@ static void update_visible_values(App *app, int changed_id) {
 static void handle_command(App *app, int id, int notification) {
     if (id == ID_REFRESH) populate_devices(app);
     else if (id == ID_RESET) audio_reset(&app->audio);
-    else if (id == ID_DEVICE && notification == CBN_SELCHANGE) select_device(app, combo_device(app));
-    else if (id == ID_DEVICE && notification == CBN_CLOSEUP && app->activity_sort_pending) {
+    else if (id == ID_DEVICE && notification == CBN_SELCHANGE) {
+        select_device(app, combo_device(app));
+        app_save_settings(app);
+    } else if (id == ID_DEVICE && notification == CBN_CLOSEUP && app->activity_sort_pending) {
         app->activity_sort_pending = false;
         rebuild_device_combo(app);
     } else if (id == ID_SIDE && notification == CBN_SELCHANGE) {
@@ -309,6 +330,9 @@ LRESULT CALLBACK settings_window_proc(HWND window, UINT message, WPARAM wparam, 
     switch (message) {
     case WM_CREATE:
         create_controls(app);
+        return 0;
+    case WM_TIMER:
+        if (wparam == TIMER_AUDIO_RECOVERY) recover_audio(app);
         return 0;
     case WM_ENDSESSION:
         if (wparam) {
