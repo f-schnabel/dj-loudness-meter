@@ -42,9 +42,18 @@ target_compile_options(audio_recovery_tests PRIVATE /W4 /WX)
 target_link_options(audio_recovery_tests PRIVATE "/MANIFESTINPUT:${CMAKE_SOURCE_DIR}/app.manifest")
 target_link_libraries(audio_recovery_tests PRIVATE meter comctl32 uxtheme)
 
+add_executable(voicemeeter_tests tests/voicemeeter_tests.cpp)
+target_include_directories(voicemeeter_tests PRIVATE src)
+target_compile_definitions(voicemeeter_tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_compile_options(voicemeeter_tests PRIVATE /W4 /WX /utf-8)
+target_link_libraries(voicemeeter_tests PRIVATE meter WIL::WIL
+  optimized "${EBUR128_RELEASE_LIBRARY}" debug "${EBUR128_DEBUG_LIBRARY}"
+  ole32 uuid avrt)
+
 enable_testing()
 add_test(NAME native_tests COMMAND native_tests)
 add_test(NAME audio_recovery_tests COMMAND audio_recovery_tests)
+add_test(NAME voicemeeter_tests COMMAND voicemeeter_tests)
 
 find_program(POWERSHELL_EXECUTABLE NAMES pwsh powershell REQUIRED)
 add_custom_target(format

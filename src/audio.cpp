@@ -222,7 +222,12 @@ static long __stdcall voicemeeter_callback(void *user, long command, void *data,
         e->last_packet = e->last_signal = 0;
         e->loudness_reset_for_silence = true;
         peak_init(&e->peak, e->frequency, e->hold_ms);
-        if (!reset_loudness(e)) return 0;
+        if (!reset_loudness(e)) {
+            e->connected = false;
+            e->voicemeeter_restart_requested = true;
+            wcscpy_s(e->error, _countof(e->error), L"libebur128 initialization failed.");
+            return 0;
+        }
         swprintf_s(
             e->device_name,
             _countof(e->device_name),
@@ -233,6 +238,12 @@ static long __stdcall voicemeeter_callback(void *user, long command, void *data,
         swprintf_s(e->format, _countof(e->format), L"%.1f kHz - 32-bit float - 2 ch", info->sample_rate / 1000.0);
         e->error[0] = 0;
         e->connected = true;
+    } else if (command == 2 || command == 3) {
+        // ENDING / CHANGE can arrive when startup devices or the engine format change.
+        // Re-register on the worker, never from inside the audio callback.
+        auto lock = wil::AcquireSRWLockExclusive(&e->lock);
+        e->connected = false;
+        e->voicemeeter_restart_requested = true;
     } else if (command == 10) {
         VoicemeeterAudioBuffer *buffer = (VoicemeeterAudioBuffer *)data;
         if (buffer->samples <= 0 || buffer->samples > 2048) return 0;
@@ -250,6 +261,10 @@ static long __stdcall voicemeeter_callback(void *user, long command, void *data,
         LARGE_INTEGER now;
         QueryPerformanceCounter(&now);
         auto lock = wil::AcquireSRWLockExclusive(&e->lock);
+        if (!e->connected || e->sample_rate != buffer->sample_rate) {
+            e->voicemeeter_restart_requested = true;
+            return 0;
+        }
         if (e->reset_requested) {
             peak_reset(&e->peak);
             e->loudness_reset_for_silence = true;
@@ -265,6 +280,15 @@ static long __stdcall voicemeeter_callback(void *user, long command, void *data,
         }
     }
     return 0;
+}
+
+static const wchar_t *voicemeeter_stream_error(AudioEngine *e, int64_t registered_at, int64_t now) {
+    auto lock = wil::AcquireSRWLockShared(&e->lock);
+    if (e->voicemeeter_restart_requested) return L"Voicemeeter audio engine changed. Reconnecting...";
+    // Silence still produces buffers. Watch packet arrival, never signal amplitude.
+    int64_t last_packet = e->last_packet ? e->last_packet : registered_at;
+    if (now - last_packet >= e->frequency * 5) return L"Voicemeeter stopped sending audio buffers. Reconnecting...";
+    return NULL;
 }
 
 static DWORD voicemeeter_thread(AudioEngine *e) {
@@ -286,10 +310,18 @@ static DWORD voicemeeter_thread(AudioEngine *e) {
                             : L"Voicemeeter audio callback registration failed."
         );
     auto unregister = wil::scope_exit([unregister_callback] { unregister_callback(); });
+    LARGE_INTEGER registered_at;
+    QueryPerformanceCounter(&registered_at);
     if (start() != 0) return capture_fail(e, L"Voicemeeter audio callback could not start. Is Voicemeeter running?");
-    WaitForSingleObject(e->stop_event, INFINITE);
-    stop();
-    return 0;
+    auto stop_callback = wil::scope_exit([stop] { stop(); });
+    for (;;) {
+        DWORD wait = WaitForSingleObject(e->stop_event, 2000);
+        if (wait == WAIT_OBJECT_0) return 0;
+        if (wait != WAIT_TIMEOUT) return capture_fail(e, L"Voicemeeter audio wait failed.");
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        if (const wchar_t *error = voicemeeter_stream_error(e, registered_at.QuadPart, now.QuadPart)) return capture_fail(e, error);
+    }
 }
 
 struct CaptureSession {
@@ -496,6 +528,8 @@ bool audio_start(AudioEngine *e, const wchar_t *endpoint) {
         auto lock = wil::AcquireSRWLockExclusive(&e->lock);
         e->device_name[0] = e->format[0] = e->error[0] = 0;
         e->connected = false;
+        e->voicemeeter_restart_requested = false;
+        e->started_at = e->last_packet = e->last_signal = 0;
     }
     wcsncpy_s(e->endpoint_id, _countof(e->endpoint_id), endpoint, _TRUNCATE);
     e->stop_event = CreateEventW(NULL, TRUE, FALSE, NULL);

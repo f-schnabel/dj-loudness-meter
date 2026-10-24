@@ -21,7 +21,7 @@ typedef struct {
     HANDLE thread, stop_event;
     wchar_t endpoint_id[512], device_name[256], format[128], error[256];
     int hold_ms;
-    bool connected, reset_requested, loudness_reset_for_silence;
+    bool connected, reset_requested, loudness_reset_for_silence, voicemeeter_restart_requested;
     PeakMeter peak;
     void *loudness;
     int channels, sample_rate;
